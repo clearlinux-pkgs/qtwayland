@@ -1,6 +1,8 @@
-Qt 5.10 introduces many new features and improvements as well as bugfixes
-over the 5.9.x series. For more details, refer to the online documentation
-included in this distribution. The documentation is also available online:
+Qt 5.10.1 is a bug-fix release. It maintains both forward and backward
+compatibility (source and binary) with Qt 5.10.0.
+
+For more details, refer to the online documentation included in this
+distribution. The documentation is also available online:
 
 http://doc.qt.io/qt-5/index.html
 
@@ -15,27 +17,13 @@ https://bugreports.qt.io/
 Each of these identifiers can be entered in the bug tracker to obtain more
 information about a particular change.
 
-****************************************************************************
-*                     Qt Wayland QPA Plugin 5.10.0 Changes                 *
-****************************************************************************
-
- - [QTBUG-58423] Make sure wl_surface exists when SurfaceCreated is sent.
-
- - Set QScreen product information.
-
- - Shared memory buffers are now created in a thread safe manner,
-   and are simple memory buffers that do not exist on disk.
+This release contains all fixes included in the Qt 5.9.4 release.
 
 ****************************************************************************
-*                   Qt Wayland Compositor API 5.10.0 Changes               *
+*                     Qt Wayland QPA Plugin 5.10.1 Changes                 *
 ****************************************************************************
 
- - [QTBUG-56174] Add support for xdg-shell-unstable-v6.
-
-
-****************************************************************************
-*                      Qt Wayland 5.10.0 General Changes                   *
-****************************************************************************
-
-- The server buffer integration has been updated to be more stable, and
-  the (private) API is now more usable.
+ - [QTBUG-65553] Fix a crash when destroying a hidden EGL window.
+ - [QTBUG-65568] Fix a protocol error when destroying xdg surfaces (v6).
+ - Fix a bug causing frame event callbacks to sometimes not get delivered.
+ - Fix crash when opening a window with a hidden parent.
