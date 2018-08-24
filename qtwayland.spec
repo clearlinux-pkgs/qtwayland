@@ -4,31 +4,31 @@
 #
 Name     : qtwayland
 Version  : 5.11.1
-Release  : 7
+Release  : 8
 URL      : http://download.qt.io/official_releases/qt/5.11/5.11.1/submodules/qtwayland-everywhere-src-5.11.1.tar.xz
 Source0  : http://download.qt.io/official_releases/qt/5.11/5.11.1/submodules/qtwayland-everywhere-src-5.11.1.tar.xz
 Summary  : No detailed summary available
 Group    : Development/Tools
 License  : GFDL-1.3 GPL-2.0 GPL-3.0 LGPL-3.0
-Requires: qtwayland-bin
 Requires: qtwayland-lib
 Requires: qtwayland-license
-BuildRequires : cmake
+BuildRequires : buildreq-cmake
+BuildRequires : buildreq-qmake
 BuildRequires : fontconfig-dev
+BuildRequires : mesa-dev
 BuildRequires : pkgconfig(Qt5Core)
 BuildRequires : pkgconfig(Qt5Gui)
 BuildRequires : pkgconfig(Qt5Qml)
 BuildRequires : pkgconfig(Qt5Quick)
 BuildRequires : pkgconfig(Qt5Test)
 BuildRequires : pkgconfig(freetype2)
+BuildRequires : pkgconfig(gl)
 BuildRequires : pkgconfig(glib-2.0)
 BuildRequires : pkgconfig(wayland-client)
 BuildRequires : pkgconfig(wayland-egl)
 BuildRequires : pkgconfig(wayland-server)
 BuildRequires : pkgconfig(xcomposite)
 BuildRequires : pkgconfig(xkbcommon)
-BuildRequires : qtbase-dev
-BuildRequires : qtbase-extras
 
 %description
 This is the QtWayland module.
@@ -36,32 +36,14 @@ The QtWayland module consists of two parts:
 Wayland platform plugin:
 Enables Qt applications to be run as Wayland clients.
 
-%package bin
-Summary: bin components for the qtwayland package.
-Group: Binaries
-Requires: qtwayland-license
-
-%description bin
-bin components for the qtwayland package.
-
-
 %package dev
 Summary: dev components for the qtwayland package.
 Group: Development
 Requires: qtwayland-lib
-Requires: qtwayland-bin
 Provides: qtwayland-devel
 
 %description dev
 dev components for the qtwayland package.
-
-
-%package extras
-Summary: extras components for the qtwayland package.
-Group: Default
-
-%description extras
-extras components for the qtwayland package.
 
 
 %package lib
@@ -94,25 +76,22 @@ test -r config.log && cat config.log
 make  %{?_smp_mflags}
 
 %install
-export SOURCE_DATE_EPOCH=1530977214
+export SOURCE_DATE_EPOCH=1535154795
 rm -rf %{buildroot}
 mkdir -p %{buildroot}/usr/share/doc/qtwayland
-cp LICENSE.LGPL3 %{buildroot}/usr/share/doc/qtwayland/LICENSE.LGPL3
 cp LICENSE.FDL %{buildroot}/usr/share/doc/qtwayland/LICENSE.FDL
-cp LICENSE.GPL3-EXCEPT %{buildroot}/usr/share/doc/qtwayland/LICENSE.GPL3-EXCEPT
 cp LICENSE.GPL2 %{buildroot}/usr/share/doc/qtwayland/LICENSE.GPL2
 cp LICENSE.GPL3 %{buildroot}/usr/share/doc/qtwayland/LICENSE.GPL3
+cp LICENSE.GPL3-EXCEPT %{buildroot}/usr/share/doc/qtwayland/LICENSE.GPL3-EXCEPT
+cp LICENSE.LGPL3 %{buildroot}/usr/share/doc/qtwayland/LICENSE.LGPL3
 %make_install
 
 %files
 %defattr(-,root,root,-)
 
-%files bin
-%defattr(-,root,root,-)
-%exclude /usr/bin/qtwaylandscanner
-
 %files dev
 %defattr(-,root,root,-)
+/usr/bin/qtwaylandscanner
 /usr/include/qt5/QtWaylandClient/5.11.1/QtWaylandClient/private/qtwaylandclient-config_p.h
 /usr/include/qt5/QtWaylandClient/5.11.1/QtWaylandClient/private/qtwaylandclientglobal_p.h
 /usr/include/qt5/QtWaylandClient/5.11.1/QtWaylandClient/private/qwayland-hardware-integration.h
@@ -380,10 +359,6 @@ cp LICENSE.GPL3 %{buildroot}/usr/share/doc/qtwayland/LICENSE.GPL3
 /usr/lib64/qt5/mkspecs/modules/qt_lib_waylandclient_private.pri
 /usr/lib64/qt5/mkspecs/modules/qt_lib_waylandcompositor.pri
 /usr/lib64/qt5/mkspecs/modules/qt_lib_waylandcompositor_private.pri
-
-%files extras
-%defattr(-,root,root,-)
-/usr/bin/qtwaylandscanner
 
 %files lib
 %defattr(-,root,root,-)
