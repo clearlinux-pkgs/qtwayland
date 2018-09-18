@@ -4,9 +4,9 @@
 #
 Name     : qtwayland
 Version  : 5.11.2
-Release  : 9
-URL      : http://download.qt.io/official_releases/qt/5.11/5.11.2/submodules/qtwayland-everywhere-src-5.11.2.tar.xz
-Source0  : http://download.qt.io/official_releases/qt/5.11/5.11.2/submodules/qtwayland-everywhere-src-5.11.2.tar.xz
+Release  : 10
+URL      : http://download.qt.io/official_releases/qt/5.11/5.11.2/submodules/qtwayland-everywhere-src-5.11.2.zip
+Source0  : http://download.qt.io/official_releases/qt/5.11/5.11.2/submodules/qtwayland-everywhere-src-5.11.2.zip
 Summary  : No detailed summary available
 Group    : Development/Tools
 License  : GFDL-1.3 GPL-2.0 GPL-3.0 LGPL-3.0
@@ -87,7 +87,7 @@ test -r config.log && cat config.log
 make  %{?_smp_mflags}
 
 %install
-export SOURCE_DATE_EPOCH=1537309200
+export SOURCE_DATE_EPOCH=1537312499
 rm -rf %{buildroot}
 mkdir -p %{buildroot}/usr/share/doc/qtwayland
 cp LICENSE.FDL %{buildroot}/usr/share/doc/qtwayland/LICENSE.FDL
