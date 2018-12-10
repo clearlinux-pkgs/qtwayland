@@ -1,5 +1,5 @@
 PKG_NAME := qtwayland
-URL = http://download.qt.io/official_releases/qt/5.11/5.11.2/submodules/qtwayland-everywhere-src-5.11.2.zip
+URL = http://download.qt.io/official_releases/qt/5.12/5.12.0/submodules/qtwayland-everywhere-src-5.12.0.zip
 ARCHIVES = 
 
 include ../common/Makefile.common
