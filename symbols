@@ -4,7 +4,7 @@ libQt5WaylandClient.so.5:Qt_5.1
 libQt5WaylandClient.so.5:Qt_5.10
 libQt5WaylandClient.so.5:Qt_5.11
 libQt5WaylandClient.so.5:Qt_5.12
-libQt5WaylandClient.so.5:Qt_5.12.2_PRIVATE_API
+libQt5WaylandClient.so.5:Qt_5.12.3_PRIVATE_API
 libQt5WaylandClient.so.5:Qt_5.2
 libQt5WaylandClient.so.5:Qt_5.3
 libQt5WaylandClient.so.5:Qt_5.4
@@ -1294,7 +1294,7 @@ libQt5WaylandCompositor.so.5:Qt_5.1
 libQt5WaylandCompositor.so.5:Qt_5.10
 libQt5WaylandCompositor.so.5:Qt_5.11
 libQt5WaylandCompositor.so.5:Qt_5.12
-libQt5WaylandCompositor.so.5:Qt_5.12.2_PRIVATE_API
+libQt5WaylandCompositor.so.5:Qt_5.12.3_PRIVATE_API
 libQt5WaylandCompositor.so.5:Qt_5.2
 libQt5WaylandCompositor.so.5:Qt_5.3
 libQt5WaylandCompositor.so.5:Qt_5.4

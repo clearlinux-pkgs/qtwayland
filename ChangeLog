@@ -1,5 +1,5 @@
-Qt 5.12.2 is a bug-fix release. It maintains both forward and backward
-compatibility (source and binary) with Qt 5.12.0 through 5.12.1.
+Qt 5.12.3 is a bug-fix release. It maintains both forward and backward
+compatibility (source and binary) with Qt 5.12.0 through 5.12.2.
 
 For more details, refer to the online documentation included in this
 distribution. The documentation is also available online:
@@ -18,7 +18,16 @@ Each of these identifiers can be entered in the bug tracker to obtain more
 information about a particular change.
 
 ****************************************************************************
+*                                Compositor                                *
+****************************************************************************
+
+ - Fixed a slightly unusual cleanup order that would lead to crashes in some
+   graphics drivers.
+
+****************************************************************************
 *                                QPA plugin                                *
 ****************************************************************************
 
- - [QTBUG-73524] Fixed a crash that sometimes happened when switching popups.
+ - Fixed a bug where the window decoration's damaged area didn't cover the
+   entire decoration. This meant some compositors would not redraw those
+   areas.
