@@ -4,7 +4,7 @@
 #
 Name     : qtwayland
 Version  : 5.12.3
-Release  : 15
+Release  : 16
 URL      : http://download.qt.io/official_releases/qt/5.12/5.12.3/submodules/qtwayland-everywhere-src-5.12.3.tar.xz
 Source0  : http://download.qt.io/official_releases/qt/5.12/5.12.3/submodules/qtwayland-everywhere-src-5.12.3.tar.xz
 Summary  : No detailed summary available
