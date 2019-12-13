@@ -1,13 +1,11 @@
-Qt 5.13.2 is a bug-fix release. It maintains both forward and backward
-compatibility (source and binary) with Qt 5.13.0 through 5.13.1.
-
-For more details, refer to the online documentation included in this
-distribution. The documentation is also available online:
+Qt 5.14 introduces many new features and improvements as well as bugfixes
+over the 5.13.x series. For more details, refer to the online documentation
+included in this distribution. The documentation is also available online:
 
 https://doc.qt.io/qt-5/index.html
 
-The Qt version 5.13 series is binary compatible with the 5.12.x series.
-Applications compiled for 5.12 will continue to run with 5.13.
+The Qt version 5.14 series is binary compatible with the 5.13.x series.
+Applications compiled for 5.13 will continue to run with 5.14.
 
 Some of the changes listed in this file include issue tracking numbers
 corresponding to tasks in the Qt Bug Tracker:
@@ -18,50 +16,49 @@ Each of these identifiers can be entered in the bug tracker to obtain more
 information about a particular change.
 
 ****************************************************************************
+*                                 General                                  *
+****************************************************************************
+
+ - Added Vulkan-based server buffer integration for
+   NVIDIA EGLStreams.
+ - [QTBUG-73822] Added protocol and Qt Quick image provider for sharing
+   textures in graphics memory between compositor and multiple clients.
+
+****************************************************************************
 *                                Compositor                                *
 ****************************************************************************
 
- - Fixed various rounding errors related to touch and mouse input.
- - Fixed touch and click events on right and left surface borders not being
-   forwarded to clients.
- - Fixed a crash when closing windows via XdgToplevel.sendClose().
- - [QTBUG-78969] Fixed a crash when trying to maximize an XdgToplevel with
-   no WaylandOutput assigned.
-
- - Important Behavior Changes:
-   * Between version 5.11 and 5.12 binary compatibility for the wayland
-     compositor module was broken by adding an additional member to various
-     classes. This was not apparent from user code as the member was behind
-     an #ifdef which would only be set while compiling Qt. As several
-     versions of Qt incompatible to 5.11 have already been released now,
-     rolling back the incompatible change would introduce further
-     incompatibility. Therefore, the change is made consistent by
-     unconditionally adding the member to the headers.
+ - The compositor module is no longer available under the GPLv2 and LGPLv3
+   licenses, but is still available under GPLv3 and commercial licenses.
+ - Make QWaylandQuickShellIntegration public so that compositors can
+   provide their code to integrate shell surfaces with QtQuick.
+ - Added QWaylandXdgPopup::sendPopupDone, which will dismiss a popup.
+ - Added support for the idle-inhibit unstable v1 Wayland extension.
+ - The compositor module no longer depends on the client module.
+ - Added support for xdg-output unstable v1 Wayland extension.
+ - Fixed a bug where compositors would advertise support for numerous
+   wl_shm pixel formats and then blindly assume everything to be
+   ARGB32_Premultiplied.
+ - Fixed a crash when destroying WaylandSurfaces and WlShellSurfaces which
+   had not yet been initialized.
+ - The compositor API now works without OpenGL support.
+ - Added a floating point version of QWaylandSurface::inputRegionContains.
 
 ****************************************************************************
 *                                QPA plugin                                *
 ****************************************************************************
 
- - Fixed a bug where key repeat would not be disabled when configured by the
-   compositor.
- - Fixed a freeze that happened when starting a drag-and-drop operation
-   without a valid source surface.
- - Fixed a bug where some windows would never become visible.
- - Fixed a bug where clipboard contents would be truncated for large pastes.
- - [QTBUG-76504] Fixed a crash that could happen if createPlatformWindow and
-   createPlatformOpenGLContext were called on the GUI and render thread
-   simultaneously.
- - Fixed a crash that could happen when destroying a window.
- - Qt now handles libwayland errors by calling qFatal() instead of exit(1).
-   This allows applications to clean up.
- - Fixed a bug where touch focus would be cleared on any touch point
-   release, also during multi-touch sequences.
- - [QTBUG-77987] Fixed a bug where the cursor rectangle for virtual keyboard
-   was incorrectly positioned.
- - Fixed a freeze that could happen if doing recursive waiting for
-   compositor frame callbacks.
- - Fixed touch rounding errors. Clients now receive fractional instead of
-   integer positions.
- - [QTBUG-78478] Fixed a crash that could happen if setting absurdly long
-   window titles with UTF-16 code units that convert to multiple bytes in
-   UTF-8.
+ - Pixel delta is now set for mouse scrolling events if originating from an
+   appropriate device such as a touch pad (requires compositor support for
+   wl_seat version 5 or later).
+ - Added support for animated cursors.
+ - Added support for middle mouse pasting through the
+   primary-selection-unstable-v1 protocol.
+ - Expose default input device to clients through the QPA API.
+ - Fixed a 100 ms freeze that would occur if applications did not draw
+   after receiving a deliverUpdateRequest().
+ - Fixed a crash when showing a window with a hidden parent.
+ - Fixed several crashes when mixing Qt with other wayland code.
+   qtwaylandscanner generated types now have a fromObject function which
+   will return nullptr if the object isn't wrapped by the type.
+
