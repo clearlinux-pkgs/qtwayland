@@ -1,0 +1,2 @@
+# Work around https://bugreports.qt.io/browse/QTBUG-83344
+-config compile_examples

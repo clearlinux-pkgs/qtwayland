@@ -1,5 +1,5 @@
-Qt 5.14.1 is a bug-fix release. It maintains both forward and backward
-compatibility (source and binary) with Qt 5.14.0.
+Qt 5.14.2 is a bug-fix release. It maintains both forward and backward
+compatibility (source and binary) with Qt 5.14.0 through 5.14.1.
 
 For more details, refer to the online documentation included in this
 distribution. The documentation is also available online:
@@ -17,18 +17,4 @@ https://bugreports.qt.io/
 Each of these identifiers can be entered in the bug tracker to obtain more
 information about a particular change.
 
-****************************************************************************
-*                                QPA plugin                                *
-****************************************************************************
-
- - Fixed a crash when re-showing a popup after hiding its parent.
- - Fixed keyboard repeat rate being set inversely, so higher rates would
-   actually result in fewer characters per second, and vice versa.
- - Fixed a performance issue due to animated cursors updating too often.
- - Fixed a compile error.
-
-****************************************************************************
-*                                Compositor                                *
-****************************************************************************
-
- - Fixed the linux-dmabuf plugins not being built on some systems.
+ - This release contains only minor code improvements.
