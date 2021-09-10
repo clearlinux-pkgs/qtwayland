@@ -5,8 +5,8 @@
 Name     : qtwayland
 Version  : 5.15.2
 Release  : 25
-URL      : http://download.qt.io/official_releases/qt/5.15/5.15.2/submodules/qtwayland-everywhere-src-5.15.2.tar.xz
-Source0  : http://download.qt.io/official_releases/qt/5.15/5.15.2/submodules/qtwayland-everywhere-src-5.15.2.tar.xz
+URL      : https://download.qt.io/official_releases/qt/5.15/5.15.2/submodules/qtwayland-everywhere-src-5.15.2.tar.xz
+Source0  : https://download.qt.io/official_releases/qt/5.15/5.15.2/submodules/qtwayland-everywhere-src-5.15.2.tar.xz
 Summary  : No detailed summary available
 Group    : Development/Tools
 License  : GFDL-1.3 GPL-2.0 GPL-3.0 LGPL-3.0 MIT
