@@ -65,6 +65,9 @@ Jan Grulich (3):
 Jani Heikkinen (1):
       Bump version
 
+Joni Poikelin (1):
+      Fix crash if no input method module could be loaded
+
 Kai Koehne (1):
       Replace remaining LGPLv3 headers in QtWaylandCompositor with GPLv3
 
@@ -75,8 +78,9 @@ Morten Johan Sørvig (2):
 Méven Car (1):
       Wayland client: use wl_keyboard to determine active state
 
-Paul Olav Tvete (1):
+Paul Olav Tvete (2):
       Wayland client: Fix crash when windows are shown/hidden during drag
+      Use wl_surface.damage_buffer on the client side
 
 Paul Wicking (1):
       Doc: List correct license information for the module
@@ -552,7 +556,7 @@ index 25afff79..96f07bc3 100644
  
  }
 diff --git a/src/client/qwaylanddisplay.cpp b/src/client/qwaylanddisplay.cpp
-index fe094f6f..a7ce280a 100644
+index fe094f6f..6f1bada5 100644
 --- a/src/client/qwaylanddisplay.cpp
 +++ b/src/client/qwaylanddisplay.cpp
 @@ -85,10 +85,203 @@
@@ -920,6 +924,15 @@ index fe094f6f..a7ce280a 100644
  }
  
  QWaylandScreen *QWaylandDisplay::screenForOutput(struct wl_output *output) const
+@@ -344,7 +488,7 @@ void QWaylandDisplay::registry_global(uint32_t id, const QString &interface, uin
+     if (interface == QStringLiteral("wl_output")) {
+         mWaitingScreens << new QWaylandScreen(this, version, id);
+     } else if (interface == QStringLiteral("wl_compositor")) {
+-        mCompositorVersion = qMin((int)version, 3);
++        mCompositorVersion = qMin((int)version, 4);
+         mCompositor.init(registry, id, mCompositorVersion);
+     } else if (interface == QStringLiteral("wl_shm")) {
+         mShm.reset(new QWaylandShm(this, version, id));
 @@ -353,7 +497,7 @@ void QWaylandDisplay::registry_global(uint32_t id, const QString &interface, uin
          mInputDevices.append(inputDevice);
  #if QT_CONFIG(wayland_datadevice)
@@ -1403,7 +1416,7 @@ index ed4a0eb4..514457e9 100644
      mRepeatTimer.stop();
  }
 diff --git a/src/client/qwaylandintegration.cpp b/src/client/qwaylandintegration.cpp
-index 7ad8e05e..3b876047 100644
+index 7ad8e05e..fbf00c6b 100644
 --- a/src/client/qwaylandintegration.cpp
 +++ b/src/client/qwaylandintegration.cpp
 @@ -192,14 +192,18 @@ QAbstractEventDispatcher *QWaylandIntegration::createEventDispatcher() const
@@ -1444,7 +1457,7 @@ index 7ad8e05e..3b876047 100644
  QList<int> QWaylandIntegration::possibleKeys(const QKeyEvent *event) const
  {
      if (auto *seat = mDisplay->currentInputDevice())
-@@ -474,13 +486,11 @@ void QWaylandIntegration::reconfigureInputContext()
+@@ -474,14 +486,12 @@ void QWaylandIntegration::reconfigureInputContext()
  
  #if QT_CONFIG(xkbcommon)
      QXkbCommon::setXkbContext(mInputContext.data(), mDisplay->xkbContext());
@@ -1458,9 +1471,11 @@ index 7ad8e05e..3b876047 100644
 -    // is why we need to check here which input context actually is being used.
 -    mDisplay->mUsingInputContextFromCompositor = qobject_cast<QWaylandInputContext *>(mInputContext.data());
 -
-     qCDebug(lcQpaWayland) << "using input method:" << inputContext()->metaObject()->className();
+-    qCDebug(lcQpaWayland) << "using input method:" << inputContext()->metaObject()->className();
++    qCDebug(lcQpaWayland) << "using input method:" << (inputContext() ? inputContext()->metaObject()->className() : "<none>");
  }
  
+ QWaylandShellIntegration *QWaylandIntegration::createShellIntegration(const QString &integrationName)
 diff --git a/src/client/qwaylandintegration_p.h b/src/client/qwaylandintegration_p.h
 index ff70ae25..73b80658 100644
 --- a/src/client/qwaylandintegration_p.h
@@ -1579,7 +1594,7 @@ index df1c94f2..050cfdc0 100644
  
  #if QT_CONFIG(cursor)
 diff --git a/src/client/qwaylandwindow.cpp b/src/client/qwaylandwindow.cpp
-index bc031ed5..acfe390e 100644
+index bc031ed5..4c5711a0 100644
 --- a/src/client/qwaylandwindow.cpp
 +++ b/src/client/qwaylandwindow.cpp
 @@ -76,7 +76,6 @@ QWaylandWindow *QWaylandWindow::mMouseGrab = nullptr;
@@ -1697,7 +1712,37 @@ index bc031ed5..acfe390e 100644
          handleUpdate();
          buffer->setBusy();
  
-@@ -613,15 +619,21 @@ void QWaylandWindow::commit()
+@@ -565,7 +571,11 @@ void QWaylandWindow::attachOffset(QWaylandBuffer *buffer)
+ 
+ void QWaylandWindow::damage(const QRect &rect)
+ {
+-    mSurface->damage(rect.x(), rect.y(), rect.width(), rect.height());
++    const int s = scale();
++    if (mDisplay->compositorVersion() >= 4)
++        mSurface->damage_buffer(s * rect.x(), s * rect.y(), s * rect.width(), s * rect.height());
++    else
++        mSurface->damage(rect.x(), rect.y(), rect.width(), rect.height());
+ }
+ 
+ void QWaylandWindow::safeCommit(QWaylandBuffer *buffer, const QRegion &damage)
+@@ -599,8 +609,14 @@ void QWaylandWindow::commit(QWaylandBuffer *buffer, const QRegion &damage)
+         return;
+ 
+     attachOffset(buffer);
+-    for (const QRect &rect: damage)
+-        mSurface->damage(rect.x(), rect.y(), rect.width(), rect.height());
++    if (mDisplay->compositorVersion() >= 4) {
++        const int s = scale();
++        for (const QRect &rect: damage)
++            mSurface->damage_buffer(s * rect.x(), s * rect.y(), s * rect.width(), s * rect.height());
++    } else {
++        for (const QRect &rect: damage)
++            mSurface->damage(rect.x(), rect.y(), rect.width(), rect.height());
++    }
+     Q_ASSERT(!buffer->committed());
+     buffer->setCommitted();
+     mSurface->commit();
+@@ -613,15 +629,21 @@ void QWaylandWindow::commit()
  
  const wl_callback_listener QWaylandWindow::callbackListener = {
      [](void *data, wl_callback *callback, uint32_t time) {
@@ -1720,7 +1765,7 @@ index bc031ed5..acfe390e 100644
      mWaitingForFrameCallback = false;
      mFrameCallbackElapsedTimer.invalidate();
  
-@@ -643,12 +655,16 @@ void QWaylandWindow::handleFrameCallback()
+@@ -643,12 +665,16 @@ void QWaylandWindow::handleFrameCallback()
          mWaitingForUpdateDelivery = true;
          QMetaObject::invokeMethod(this, doHandleExpose, Qt::QueuedConnection);
      }
@@ -1739,7 +1784,7 @@ index bc031ed5..acfe390e 100644
  
      if (mWaitingForFrameCallback) {
          qCDebug(lcWaylandBackingstore) << "Didn't receive frame callback in time, window should now be inexposed";
-@@ -797,7 +813,7 @@ bool QWaylandWindow::createDecoration()
+@@ -797,7 +823,7 @@ bool QWaylandWindow::createDecoration()
          decoration = false;
      if (mSubSurfaceWindow)
          decoration = false;
@@ -1748,7 +1793,7 @@ index bc031ed5..acfe390e 100644
          decoration = false;
  
      bool hadDecoration = mWindowDecoration;
-@@ -1070,10 +1086,18 @@ bool QWaylandWindow::setMouseGrabEnabled(bool grab)
+@@ -1070,10 +1096,18 @@ bool QWaylandWindow::setMouseGrabEnabled(bool grab)
      return true;
  }
  
@@ -1768,7 +1813,7 @@ index bc031ed5..acfe390e 100644
      mLastReportedWindowStates = states;
  }
  
-@@ -1136,8 +1160,11 @@ void QWaylandWindow::requestUpdate()
+@@ -1136,8 +1170,11 @@ void QWaylandWindow::requestUpdate()
      Q_ASSERT(hasPendingUpdateRequest()); // should be set by QPA
  
      // If we have a frame callback all is good and will be taken care of there
@@ -1782,7 +1827,7 @@ index bc031ed5..acfe390e 100644
  
      // If we've already called deliverUpdateRequest(), but haven't seen any attach+commit/swap yet
      // This is a somewhat redundant behavior and might indicate a bug in the calling code, so log
-@@ -1150,7 +1177,12 @@ void QWaylandWindow::requestUpdate()
+@@ -1150,7 +1187,12 @@ void QWaylandWindow::requestUpdate()
      // so use invokeMethod to delay the delivery a bit.
      QMetaObject::invokeMethod(this, [this] {
          // Things might have changed in the meantime
@@ -1796,7 +1841,7 @@ index bc031ed5..acfe390e 100644
              deliverUpdateRequest();
      }, Qt::QueuedConnection);
  }
-@@ -1161,19 +1193,19 @@ void QWaylandWindow::requestUpdate()
+@@ -1161,19 +1203,19 @@ void QWaylandWindow::requestUpdate()
  void QWaylandWindow::handleUpdate()
  {
      qCDebug(lcWaylandBackingstore) << "handleUpdate" << QThread::currentThread();
@@ -1822,7 +1867,7 @@ index bc031ed5..acfe390e 100644
      mFrameCallback = wl_surface_frame(wrappedSurface);
      wl_proxy_wrapper_destroy(wrappedSurface);
      wl_callback_add_listener(mFrameCallback, &QWaylandWindow::callbackListener, this);
-@@ -1183,6 +1215,8 @@ void QWaylandWindow::handleUpdate()
+@@ -1183,6 +1225,8 @@ void QWaylandWindow::handleUpdate()
      // Start a timer for handling the case when the compositor stops sending frame callbacks.
      if (mFrameCallbackTimeout > 0) {
          QMetaObject::invokeMethod(this, [this] {
@@ -1831,7 +1876,7 @@ index bc031ed5..acfe390e 100644
              if (mWaitingForFrameCallback) {
                  if (mFrameCallbackCheckIntervalTimerId < 0)
                      mFrameCallbackCheckIntervalTimerId = startTimer(mFrameCallbackTimeout);
-@@ -1231,12 +1265,14 @@ bool QWaylandWindow::isOpaque() const
+@@ -1231,12 +1275,14 @@ bool QWaylandWindow::isOpaque() const
  
  void QWaylandWindow::setOpaqueArea(const QRegion &opaqueArea)
  {
@@ -2266,6 +2311,66 @@ index 1568b3b9..067410d0 100644
  
  class DataDeviceCompositor : public DefaultCompositor {
  public:
+diff --git a/tests/auto/client/shared/coreprotocol.h b/tests/auto/client/shared/coreprotocol.h
+index a1af137a..296dbf47 100644
+--- a/tests/auto/client/shared/coreprotocol.h
++++ b/tests/auto/client/shared/coreprotocol.h
+@@ -158,7 +158,7 @@ class WlCompositor : public Global, public QtWaylandServer::wl_compositor
+ {
+     Q_OBJECT
+ public:
+-    explicit WlCompositor(CoreCompositor *compositor, int version = 3)
++    explicit WlCompositor(CoreCompositor *compositor, int version = 4)
+         : QtWaylandServer::wl_compositor(compositor->m_display, version)
+         , m_compositor(compositor)
+     {}
+diff --git a/tests/auto/client/shared_old/mockcompositor.cpp b/tests/auto/client/shared_old/mockcompositor.cpp
+index a415cbf5..b1d3d07d 100644
+--- a/tests/auto/client/shared_old/mockcompositor.cpp
++++ b/tests/auto/client/shared_old/mockcompositor.cpp
+@@ -342,7 +342,7 @@ Compositor::Compositor(MockCompositor *mockCompositor)
+         exit(EXIT_FAILURE);
+     }
+ 
+-    wl_global_create(m_display, &wl_compositor_interface, 1, this, bindCompositor);
++    wl_global_create(m_display, &wl_compositor_interface, 4, this, bindCompositor);
+ 
+     m_data_device_manager.reset(new DataDeviceManager(this, m_display));
+ 
+diff --git a/tests/auto/client/shared_old/mocksurface.cpp b/tests/auto/client/shared_old/mocksurface.cpp
+index e9df5f90..c3246e4a 100644
+--- a/tests/auto/client/shared_old/mocksurface.cpp
++++ b/tests/auto/client/shared_old/mocksurface.cpp
+@@ -125,6 +125,16 @@ void Surface::surface_damage(Resource *resource,
+     Q_UNUSED(height);
+ }
+ 
++void Surface::surface_damage_buffer(Resource *resource,
++                                    int32_t x, int32_t y, int32_t width, int32_t height)
++{
++    Q_UNUSED(resource);
++    Q_UNUSED(x);
++    Q_UNUSED(y);
++    Q_UNUSED(width);
++    Q_UNUSED(height);
++}
++
+ void Surface::surface_frame(Resource *resource,
+                             uint32_t callback)
+ {
+diff --git a/tests/auto/client/shared_old/mocksurface.h b/tests/auto/client/shared_old/mocksurface.h
+index 949dc23d..d176837e 100644
+--- a/tests/auto/client/shared_old/mocksurface.h
++++ b/tests/auto/client/shared_old/mocksurface.h
+@@ -65,6 +65,8 @@ protected:
+                         struct wl_resource *buffer, int x, int y) override;
+     void surface_damage(Resource *resource,
+                         int32_t x, int32_t y, int32_t width, int32_t height) override;
++    void surface_damage_buffer(Resource *resource,
++                               int32_t x, int32_t y, int32_t width, int32_t height) override;
+     void surface_frame(Resource *resource,
+                        uint32_t callback) override;
+     void surface_commit(Resource *resource) override;
 diff --git a/tests/auto/client/surface/tst_surface.cpp b/tests/auto/client/surface/tst_surface.cpp
 index b8a65f15..95e4e609 100644
 --- a/tests/auto/client/surface/tst_surface.cpp
