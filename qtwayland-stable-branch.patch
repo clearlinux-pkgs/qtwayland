@@ -91,9 +91,10 @@ Rodney Dawes (1):
 Roman Genkhel (1):
       Check pointer for null before use in ASSERT
 
-Vlad Zahorodnii (2):
+Vlad Zahorodnii (3):
       Scanner: Avoid accessing dangling pointers in destroy_func()
       Client: Announce an output after receiving more complete state
+      Client: Remove mWaitingForUpdateDelivery
 
 Weng Xuetian (2):
       Use qWarning and _exit() instead of qFatal for wayland error
@@ -1594,7 +1595,7 @@ index df1c94f2..050cfdc0 100644
  
  #if QT_CONFIG(cursor)
 diff --git a/src/client/qwaylandwindow.cpp b/src/client/qwaylandwindow.cpp
-index bc031ed5..4c5711a0 100644
+index bc031ed5..949374b1 100644
 --- a/src/client/qwaylandwindow.cpp
 +++ b/src/client/qwaylandwindow.cpp
 @@ -76,7 +76,6 @@ QWaylandWindow *QWaylandWindow::mMouseGrab = nullptr;
@@ -1742,7 +1743,7 @@ index bc031ed5..4c5711a0 100644
      Q_ASSERT(!buffer->committed());
      buffer->setCommitted();
      mSurface->commit();
-@@ -613,15 +629,21 @@ void QWaylandWindow::commit()
+@@ -613,42 +629,47 @@ void QWaylandWindow::commit()
  
  const wl_callback_listener QWaylandWindow::callbackListener = {
      [](void *data, wl_callback *callback, uint32_t time) {
@@ -1765,10 +1766,36 @@ index bc031ed5..4c5711a0 100644
      mWaitingForFrameCallback = false;
      mFrameCallbackElapsedTimer.invalidate();
  
-@@ -643,12 +665,16 @@ void QWaylandWindow::handleFrameCallback()
-         mWaitingForUpdateDelivery = true;
-         QMetaObject::invokeMethod(this, doHandleExpose, Qt::QueuedConnection);
-     }
+     // The rest can wait until we can run it on the correct thread
+-    if (!mWaitingForUpdateDelivery) {
+-        auto doHandleExpose = [this]() {
+-            bool wasExposed = isExposed();
+-            mFrameCallbackTimedOut = false;
+-            if (!wasExposed && isExposed()) // Did setting mFrameCallbackTimedOut make the window exposed?
+-                sendExposeEvent(QRect(QPoint(), geometry().size()));
+-            if (wasExposed && hasPendingUpdateRequest())
+-                deliverUpdateRequest();
+-
+-            mWaitingForUpdateDelivery = false;
+-        };
+-
+-        // Queued connection, to make sure we don't call handleUpdate() from inside waitForFrameSync()
+-        // in the single-threaded case.
+-        mWaitingForUpdateDelivery = true;
+-        QMetaObject::invokeMethod(this, doHandleExpose, Qt::QueuedConnection);
+-    }
++    auto doHandleExpose = [this]() {
++        bool wasExposed = isExposed();
++        mFrameCallbackTimedOut = false;
++        if (!wasExposed && isExposed()) // Did setting mFrameCallbackTimedOut make the window exposed?
++            sendExposeEvent(QRect(QPoint(), geometry().size()));
++        if (wasExposed && hasPendingUpdateRequest())
++            deliverUpdateRequest();
++    };
++
++    // Queued connection, to make sure we don't call handleUpdate() from inside waitForFrameSync()
++    // in the single-threaded case.
++    QMetaObject::invokeMethod(this, doHandleExpose, Qt::QueuedConnection);
 +
 +    mFrameSyncWait.notify_all();
  }
@@ -1784,7 +1811,7 @@ index bc031ed5..4c5711a0 100644
  
      if (mWaitingForFrameCallback) {
          qCDebug(lcWaylandBackingstore) << "Didn't receive frame callback in time, window should now be inexposed";
-@@ -797,7 +823,7 @@ bool QWaylandWindow::createDecoration()
+@@ -797,7 +818,7 @@ bool QWaylandWindow::createDecoration()
          decoration = false;
      if (mSubSurfaceWindow)
          decoration = false;
@@ -1793,7 +1820,7 @@ index bc031ed5..4c5711a0 100644
          decoration = false;
  
      bool hadDecoration = mWindowDecoration;
-@@ -1070,10 +1096,18 @@ bool QWaylandWindow::setMouseGrabEnabled(bool grab)
+@@ -1070,10 +1091,18 @@ bool QWaylandWindow::setMouseGrabEnabled(bool grab)
      return true;
  }
  
@@ -1813,7 +1840,7 @@ index bc031ed5..4c5711a0 100644
      mLastReportedWindowStates = states;
  }
  
-@@ -1136,8 +1170,11 @@ void QWaylandWindow::requestUpdate()
+@@ -1136,8 +1165,11 @@ void QWaylandWindow::requestUpdate()
      Q_ASSERT(hasPendingUpdateRequest()); // should be set by QPA
  
      // If we have a frame callback all is good and will be taken care of there
@@ -1827,7 +1854,7 @@ index bc031ed5..4c5711a0 100644
  
      // If we've already called deliverUpdateRequest(), but haven't seen any attach+commit/swap yet
      // This is a somewhat redundant behavior and might indicate a bug in the calling code, so log
-@@ -1150,7 +1187,12 @@ void QWaylandWindow::requestUpdate()
+@@ -1150,7 +1182,12 @@ void QWaylandWindow::requestUpdate()
      // so use invokeMethod to delay the delivery a bit.
      QMetaObject::invokeMethod(this, [this] {
          // Things might have changed in the meantime
@@ -1841,7 +1868,7 @@ index bc031ed5..4c5711a0 100644
              deliverUpdateRequest();
      }, Qt::QueuedConnection);
  }
-@@ -1161,19 +1203,19 @@ void QWaylandWindow::requestUpdate()
+@@ -1161,19 +1198,19 @@ void QWaylandWindow::requestUpdate()
  void QWaylandWindow::handleUpdate()
  {
      qCDebug(lcWaylandBackingstore) << "handleUpdate" << QThread::currentThread();
@@ -1867,7 +1894,7 @@ index bc031ed5..4c5711a0 100644
      mFrameCallback = wl_surface_frame(wrappedSurface);
      wl_proxy_wrapper_destroy(wrappedSurface);
      wl_callback_add_listener(mFrameCallback, &QWaylandWindow::callbackListener, this);
-@@ -1183,6 +1225,8 @@ void QWaylandWindow::handleUpdate()
+@@ -1183,6 +1220,8 @@ void QWaylandWindow::handleUpdate()
      // Start a timer for handling the case when the compositor stops sending frame callbacks.
      if (mFrameCallbackTimeout > 0) {
          QMetaObject::invokeMethod(this, [this] {
@@ -1876,7 +1903,7 @@ index bc031ed5..4c5711a0 100644
              if (mWaitingForFrameCallback) {
                  if (mFrameCallbackCheckIntervalTimerId < 0)
                      mFrameCallbackCheckIntervalTimerId = startTimer(mFrameCallbackTimeout);
-@@ -1231,12 +1275,14 @@ bool QWaylandWindow::isOpaque() const
+@@ -1231,12 +1270,14 @@ bool QWaylandWindow::isOpaque() const
  
  void QWaylandWindow::setOpaqueArea(const QRegion &opaqueArea)
  {
@@ -1895,7 +1922,7 @@ index bc031ed5..4c5711a0 100644
      wl_region_destroy(region);
  }
 diff --git a/src/client/qwaylandwindow_p.h b/src/client/qwaylandwindow_p.h
-index 6cc1664b..d45980a8 100644
+index 6cc1664b..3ff68ccb 100644
 --- a/src/client/qwaylandwindow_p.h
 +++ b/src/client/qwaylandwindow_p.h
 @@ -148,6 +148,7 @@ public:
@@ -1906,7 +1933,11 @@ index 6cc1664b..d45980a8 100644
  
      void raise() override;
      void lower() override;
-@@ -231,7 +232,7 @@ protected:
+@@ -227,11 +228,10 @@ protected:
+     WId mWindowId;
+     bool mWaitingForFrameCallback = false;
+     bool mFrameCallbackTimedOut = false; // Whether the frame callback has timed out
+-    bool mWaitingForUpdateDelivery = false;
      int mFrameCallbackCheckIntervalTimerId = -1;
      QElapsedTimer mFrameCallbackElapsedTimer;
      struct ::wl_callback *mFrameCallback = nullptr;
