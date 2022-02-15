@@ -20,7 +20,7 @@ Antti Kokko (1):
 Arjen Hiemstra (1):
       Client: Delay deletion of QDrag object until after we're done with it
 
-David Edmundson (8):
+David Edmundson (9):
       Client: Send set_window_geometry only once configured
       Client: Send exposeEvent to parent on subsurface position changes
       Client: Connect drags being accepted to updating the source drag icon
@@ -29,6 +29,7 @@ David Edmundson (8):
       Fix build
       Client: Implement DataDeviceV3
       Client: Avoid processing of events when showing windows
+      client: Simplify round trip behavior
 
 David Redondo (1):
       Hook up queryKeyboardModifers
@@ -96,9 +97,11 @@ Vlad Zahorodnii (3):
       Client: Announce an output after receiving more complete state
       Client: Remove mWaitingForUpdateDelivery
 
-Weng Xuetian (2):
+Weng Xuetian (4):
       Use qWarning and _exit() instead of qFatal for wayland error
       Set preedit cursor when cursor equals to 0
+      Cursor position == 0 should still show the cursor
+      Update the preedit styling mapping
 
 Zhang Liang (1):
       Fix: remove listener
@@ -557,7 +560,7 @@ index 25afff79..96f07bc3 100644
  
  }
 diff --git a/src/client/qwaylanddisplay.cpp b/src/client/qwaylanddisplay.cpp
-index fe094f6f..6f1bada5 100644
+index fe094f6f..86045a35 100644
 --- a/src/client/qwaylanddisplay.cpp
 +++ b/src/client/qwaylanddisplay.cpp
 @@ -85,10 +85,203 @@
@@ -843,24 +846,14 @@ index fe094f6f..6f1bada5 100644
 -    }
 -
 -    wl_display_flush(mDisplay);
-+    m_eventThread->readAndDispatchEvents();
- }
- 
+-}
+-
 -void QWaylandDisplay::blockingReadEvents()
-+// We have to wait until we have an eventDispatcher before creating the eventThread,
-+// otherwise forceRoundTrip() may block inside _events_read() because eventThread is
-+// polling.
-+void QWaylandDisplay::initEventThread()
- {
+-{
 -    if (wl_display_dispatch(mDisplay) < 0)
 -        checkError();
 -}
-+    m_eventThread.reset(
-+            new EventThread(mDisplay, /* default queue */ nullptr, EventThread::EmitToDispatch));
-+    connect(m_eventThread.get(), &EventThread::needReadAndDispatch, this,
-+            &QWaylandDisplay::flushRequests, Qt::QueuedConnection);
-+    m_eventThread->start();
- 
+-
 -void QWaylandDisplay::destroyFrameQueue(const QWaylandDisplay::FrameQueue &q)
 -{
 -    QWriteLocker locker(&m_frameQueueLock);
@@ -872,6 +865,29 @@ index fe094f6f..6f1bada5 100644
 -    if (q.queue != nullptr)
 -        wl_event_queue_destroy(q.queue);
 -    delete q.mutex;
++    m_eventThread->readAndDispatchEvents();
+ }
+ 
+-QWaylandDisplay::FrameQueue QWaylandDisplay::createFrameQueue()
++// We have to wait until we have an eventDispatcher before creating the eventThread,
++// otherwise forceRoundTrip() may block inside _events_read() because eventThread is
++// polling.
++void QWaylandDisplay::initEventThread()
+ {
+-    QWriteLocker locker(&m_frameQueueLock);
+-    FrameQueue q{createEventQueue()};
+-    mExternalQueues.append(q);
+-    return q;
+-}
++    m_eventThread.reset(
++            new EventThread(mDisplay, /* default queue */ nullptr, EventThread::EmitToDispatch));
++    connect(m_eventThread.get(), &EventThread::needReadAndDispatch, this,
++            &QWaylandDisplay::flushRequests, Qt::QueuedConnection);
++    m_eventThread->start();
+ 
+-wl_event_queue *QWaylandDisplay::createEventQueue()
+-{
+-    return wl_display_create_queue(mDisplay);
 +    // wl_display_disconnect() free this.
 +    m_frameEventQueue = wl_display_create_queue(mDisplay);
 +    m_frameEventQueueThread.reset(
@@ -879,19 +895,6 @@ index fe094f6f..6f1bada5 100644
 +    m_frameEventQueueThread->start();
  }
  
--QWaylandDisplay::FrameQueue QWaylandDisplay::createFrameQueue()
--{
--    QWriteLocker locker(&m_frameQueueLock);
--    FrameQueue q{createEventQueue()};
--    mExternalQueues.append(q);
--    return q;
--}
--
--wl_event_queue *QWaylandDisplay::createEventQueue()
--{
--    return wl_display_create_queue(mDisplay);
--}
--
 -void QWaylandDisplay::dispatchQueueWhile(wl_event_queue *queue, std::function<bool ()> condition, int timeout)
 +void QWaylandDisplay::blockingReadEvents()
  {
@@ -955,7 +958,59 @@ index fe094f6f..6f1bada5 100644
  }
  
  uint32_t QWaylandDisplay::currentTimeMillisec()
-@@ -573,14 +718,10 @@ void QWaylandDisplay::handleKeyboardFocusChanged(QWaylandInputDevice *inputDevic
+@@ -466,50 +611,9 @@ uint32_t QWaylandDisplay::currentTimeMillisec()
+     return 0;
+ }
+ 
+-static void
+-sync_callback(void *data, struct wl_callback *callback, uint32_t serial)
+-{
+-    Q_UNUSED(serial)
+-    bool *done = static_cast<bool *>(data);
+-
+-    *done = true;
+-
+-    // If the wl_callback done event is received after the condition check in the while loop in
+-    // forceRoundTrip(), but before the call to processEvents, the call to processEvents may block
+-    // forever if no more events are posted (eventhough the callback is handled in response to the
+-    // aboutToBlock signal). Hence, we wake up the event dispatcher so forceRoundTrip may return.
+-    // (QTBUG-64696)
+-    if (auto *dispatcher = QThread::currentThread()->eventDispatcher())
+-        dispatcher->wakeUp();
+-
+-    wl_callback_destroy(callback);
+-}
+-
+-static const struct wl_callback_listener sync_listener = {
+-    sync_callback
+-};
+-
+ void QWaylandDisplay::forceRoundTrip()
+ {
+-    // wl_display_roundtrip() works on the main queue only,
+-    // but we use a separate one, so basically reimplement it here
+-    int ret = 0;
+-    bool done = false;
+-    wl_callback *callback = wl_display_sync(mDisplay);
+-    wl_callback_add_listener(callback, &sync_listener, &done);
+-    flushRequests();
+-    if (QThread::currentThread()->eventDispatcher()) {
+-        while (!done && ret >= 0) {
+-            QThread::currentThread()->eventDispatcher()->processEvents(QEventLoop::WaitForMoreEvents);
+-            ret = wl_display_dispatch_pending(mDisplay);
+-        }
+-    } else {
+-        while (!done && ret >= 0)
+-            ret = wl_display_dispatch(mDisplay);
+-    }
+-
+-    if (ret == -1 && !done)
+-        wl_callback_destroy(callback);
++     wl_display_roundtrip(mDisplay);
+ }
+ 
+ bool QWaylandDisplay::supportsWindowDecoration() const
+@@ -573,14 +677,10 @@ void QWaylandDisplay::handleKeyboardFocusChanged(QWaylandInputDevice *inputDevic
      if (mLastKeyboardFocus == keyboardFocus)
          return;
  
@@ -974,7 +1029,7 @@ index fe094f6f..6f1bada5 100644
  
      mLastKeyboardFocus = keyboardFocus;
  }
-@@ -599,6 +740,19 @@ void QWaylandDisplay::handleWaylandSync()
+@@ -599,6 +699,19 @@ void QWaylandDisplay::handleWaylandSync()
      QWindow *activeWindow = mActiveWindows.empty() ? nullptr : mActiveWindows.last()->window();
      if (activeWindow != QGuiApplication::focusWindow())
          QWindowSystemInterface::handleWindowActivated(activeWindow);
@@ -994,7 +1049,7 @@ index fe094f6f..6f1bada5 100644
  }
  
  const wl_callback_listener QWaylandDisplay::syncCallbackListener = {
-@@ -625,6 +779,13 @@ QWaylandInputDevice *QWaylandDisplay::defaultInputDevice() const
+@@ -625,6 +738,13 @@ QWaylandInputDevice *QWaylandDisplay::defaultInputDevice() const
      return mInputDevices.isEmpty() ? 0 : mInputDevices.first();
  }
  
@@ -1008,7 +1063,7 @@ index fe094f6f..6f1bada5 100644
  #if QT_CONFIG(cursor)
  
  QWaylandCursor *QWaylandDisplay::waylandCursor()
-@@ -651,4 +812,6 @@ QWaylandCursorTheme *QWaylandDisplay::loadCursorTheme(const QString &name, int p
+@@ -651,4 +771,6 @@ QWaylandCursorTheme *QWaylandDisplay::loadCursorTheme(const QString &name, int p
  
  } // namespace QtWaylandClient
  
@@ -2304,18 +2359,79 @@ index 1d635f06..e2f87bbd 100644
              printf("        }\n");
              printf("        delete resource;\n");
 diff --git a/src/shared/qwaylandinputmethodeventbuilder.cpp b/src/shared/qwaylandinputmethodeventbuilder.cpp
-index 526d0ef4..25be2509 100644
+index 526d0ef4..f50ccf30 100644
 --- a/src/shared/qwaylandinputmethodeventbuilder.cpp
 +++ b/src/shared/qwaylandinputmethodeventbuilder.cpp
-@@ -151,7 +151,7 @@ QInputMethodEvent QWaylandInputMethodEventBuilder::buildPreedit(const QString &t
- {
-     QList<QInputMethodEvent::Attribute> attributes;
+@@ -39,7 +39,10 @@
  
--    if (m_preeditCursor < 0) {
-+    if (m_preeditCursor <= 0) {
+ #include "qwaylandinputmethodeventbuilder_p.h"
+ 
++#include <QBrush>
++#include <QGuiApplication>
+ #include <QInputMethod>
++#include <QPalette>
+ #include <QTextCharFormat>
+ 
+ #ifdef QT_BUILD_WAYLANDCOMPOSITOR_LIB
+@@ -81,32 +84,38 @@ void QWaylandInputMethodEventBuilder::addPreeditStyling(uint32_t index, uint32_t
+     QTextCharFormat format;
+ 
+     switch (style) {
+-    case 0:
+-    case 1:
++    case ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_NONE:
++        break;
++    case ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_DEFAULT:
++    case ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_UNDERLINE:
+         format.setFontUnderline(true);
+         format.setUnderlineStyle(QTextCharFormat::SingleUnderline);
+         m_preeditStyles.append(QInputMethodEvent::Attribute(QInputMethodEvent::TextFormat, index, length, format));
+         break;
+-    case 2:
+-    case 3:
++    case ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_ACTIVE:
++    case ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_INACTIVE:
+         format.setFontWeight(QFont::Bold);
+         format.setFontUnderline(true);
+         format.setUnderlineStyle(QTextCharFormat::SingleUnderline);
+         m_preeditStyles.append(QInputMethodEvent::Attribute(QInputMethodEvent::TextFormat, index, length, format));
+         break;
+-    case 4:
+-        format.setFontUnderline(true);
+-        format.setUnderlineStyle(QTextCharFormat::SingleUnderline);
+-        m_preeditStyles.append(QInputMethodEvent::Attribute(QInputMethodEvent::TextFormat, index, length, format));
++    case ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_HIGHLIGHT:
++    case ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_SELECTION:
++        {
++            format.setFontUnderline(true);
++            format.setUnderlineStyle(QTextCharFormat::SingleUnderline);
++            QPalette palette = qApp->palette();
++            format.setBackground(QBrush(palette.color(QPalette::Active, QPalette::Highlight)));
++            format.setForeground(QBrush(palette.color(QPalette::Active, QPalette::HighlightedText)));
++            m_preeditStyles.append(QInputMethodEvent::Attribute(QInputMethodEvent::TextFormat, index, length, format));
++        }
+         break;
+-    case 5:
++    case ZWP_TEXT_INPUT_V2_PREEDIT_STYLE_INCORRECT:
+         format.setFontUnderline(true);
+         format.setUnderlineStyle(QTextCharFormat::WaveUnderline);
+         format.setUnderlineColor(QColor(Qt::red));
+         m_preeditStyles.append(QInputMethodEvent::Attribute(QInputMethodEvent::TextFormat, index, length, format));
+         break;
+-//    case QtWayland::wl_text_input::preedit_style_selection:
+-//    case QtWayland::wl_text_input::preedit_style_none:
+     default:
+         break;
+     }
+@@ -153,7 +162,7 @@ QInputMethodEvent QWaylandInputMethodEventBuilder::buildPreedit(const QString &t
+ 
+     if (m_preeditCursor < 0) {
          attributes.append(QInputMethodEvent::Attribute(QInputMethodEvent::Cursor, 0, 0, QVariant()));
-     } else if (m_preeditCursor > 0) {
+-    } else if (m_preeditCursor > 0) {
++    } else {
          attributes.append(QInputMethodEvent::Attribute(QInputMethodEvent::Cursor, indexFromWayland(text, m_preeditCursor), 1, QVariant()));
+     }
+ 
 diff --git a/src/shared/qwaylandmimehelper.cpp b/src/shared/qwaylandmimehelper.cpp
 index a5fdd34d..051a91dc 100644
 --- a/src/shared/qwaylandmimehelper.cpp
