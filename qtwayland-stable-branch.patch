@@ -92,10 +92,11 @@ Rodney Dawes (1):
 Roman Genkhel (1):
       Check pointer for null before use in ASSERT
 
-Vlad Zahorodnii (3):
+Vlad Zahorodnii (4):
       Scanner: Avoid accessing dangling pointers in destroy_func()
       Client: Announce an output after receiving more complete state
       Client: Remove mWaitingForUpdateDelivery
+      Client: Fix opaque region setter
 
 Weng Xuetian (4):
       Use qWarning and _exit() instead of qFatal for wayland error
@@ -1650,7 +1651,7 @@ index df1c94f2..050cfdc0 100644
  
  #if QT_CONFIG(cursor)
 diff --git a/src/client/qwaylandwindow.cpp b/src/client/qwaylandwindow.cpp
-index bc031ed5..949374b1 100644
+index bc031ed5..fee2ecdd 100644
 --- a/src/client/qwaylandwindow.cpp
 +++ b/src/client/qwaylandwindow.cpp
 @@ -76,7 +76,6 @@ QWaylandWindow *QWaylandWindow::mMouseGrab = nullptr;
@@ -1719,7 +1720,7 @@ index bc031ed5..949374b1 100644
      }
  }
  
-@@ -362,7 +368,7 @@ void QWaylandWindow::setGeometry(const QRect &rect)
+@@ -362,11 +368,11 @@ void QWaylandWindow::setGeometry(const QRect &rect)
      if (isExposed() && !mInResizeFromApplyConfigure && exposeGeometry != mLastExposeGeometry)
          sendExposeEvent(exposeGeometry);
  
@@ -1728,6 +1729,11 @@ index bc031ed5..949374b1 100644
          mShellSurface->setWindowGeometry(windowContentGeometry());
  
      if (isOpaque() && mMask.isEmpty())
+-        setOpaqueArea(rect);
++        setOpaqueArea(QRect(QPoint(0, 0), rect.size()));
+ }
+ 
+ void QWaylandWindow::resizeFromApplyConfigure(const QSize &sizeWithMargins, const QPoint &offset)
 @@ -427,9 +433,8 @@ void QWaylandWindow::setVisible(bool visible)
          if (window()->type() == Qt::Popup || window()->type() == Qt::ToolTip)
              activePopups << this;
