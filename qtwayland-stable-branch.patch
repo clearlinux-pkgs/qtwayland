@@ -42,6 +42,9 @@ Eskil Abrahamsen Blomfeldt (2):
       Fix leaked subsurface wayland items
       Fix memory leak in QWaylandGLContext
 
+Fabian Vogt (1):
+      Use proper dependencies in compile tests
+
 Georges Basile Stavracas Neto (2):
       Client: Don't always recreate frame callbacks
       Client: Always destroy frame callback in the actual callback
@@ -107,6 +110,39 @@ Weng Xuetian (4):
 Zhang Liang (1):
       Fix: remove listener
 
+diff --git a/src/client/configure.json b/src/client/configure.json
+index 2f424580..29222357 100644
+--- a/src/client/configure.json
++++ b/src/client/configure.json
+@@ -149,8 +149,7 @@
+                     "#endif"
+                 ]
+             },
+-            "libs": "-ldrm",
+-            "use": "egl"
++            "use": "drm egl"
+         },
+         "vulkan-server-buffer": {
+             "label": "Vulkan Buffer Sharing",
+@@ -168,7 +167,8 @@
+                     "exportAllocInfo.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;",
+                     "return 0;"
+                 ]
+-            }
++            },
++            "use": "wayland-client"
+         },
+         "egl_1_5-wayland": {
+             "label": "EGL 1.5 with Wayland Platform",
+@@ -183,7 +183,7 @@
+                     "eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_EXT, (struct wl_display *)(nullptr), nullptr);"
+                 ]
+             },
+-            "use": "egl"
++            "use": "egl wayland-client"
+         }
+     },
+ 
 diff --git a/src/client/global/qwaylandclientextension.cpp b/src/client/global/qwaylandclientextension.cpp
 index 125b1e19..edccfe63 100644
 --- a/src/client/global/qwaylandclientextension.cpp
@@ -2051,6 +2087,72 @@ index 15f0195c..2218f43a 100644
      } else {
          bool success = QMetaObject::invokeMethod(d->subsurfaceHandler, "handleSubsurfaceAdded", Q_ARG(QWaylandSurface *, childSurface));
          if (!success)
+diff --git a/src/compositor/configure.json b/src/compositor/configure.json
+index bcfd5215..da95d07b 100644
+--- a/src/compositor/configure.json
++++ b/src/compositor/configure.json
+@@ -7,6 +7,31 @@
+     "testDir": "../../config.tests",
+ 
+     "libraries": {
++        "wayland-client": {
++            "label": "Wayland client library",
++            "headers": "wayland-version.h",
++            "test": {
++                "main": [
++                    "#if WAYLAND_VERSION_MAJOR < 1",
++                    "# error Wayland 1.8.0 or higher required",
++                    "#endif",
++                    "#if WAYLAND_VERSION_MAJOR == 1",
++                    "# if WAYLAND_VERSION_MINOR < 8",
++                    "#  error Wayland 1.8.0 or higher required",
++                    "# endif",
++                    "# if WAYLAND_VERSION_MINOR == 8",
++                    "#  if WAYLAND_VERSION_MICRO < 0",
++                    "#   error Wayland 1.8.0 or higher required",
++                    "#  endif",
++                    "# endif",
++                    "#endif"
++                 ]
++            },
++            "sources": [
++                { "type": "pkgConfig", "args": "wayland-client" },
++                "-lwayland-client"
++            ]
++        },
+         "wayland-server": {
+             "label": "wayland-server",
+             "headers": "wayland-version.h",
+@@ -151,8 +176,7 @@
+                     "#endif"
+                 ]
+             },
+-            "libs": "-ldrm",
+-            "use": "egl"
++            "use": "drm egl"
+         },
+         "dmabuf-client-buffer": {
+             "label": "Linux Client dma-buf Buffer Sharing",
+@@ -176,8 +200,7 @@
+                     "return 0;"
+                 ]
+             },
+-            "libs": "-ldrm",
+-            "use": "egl"
++            "use": "drm egl"
+         },
+         "vulkan-server-buffer": {
+             "label": "Vulkan Buffer Sharing",
+@@ -195,7 +218,8 @@
+                     "exportAllocInfo.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;",
+                     "return 0;"
+                 ]
+-            }
++            },
++            "use": "wayland-client"
+         }
+     },
+ 
 diff --git a/src/hardwareintegration/client/wayland-egl/qwaylandeglwindow.cpp b/src/hardwareintegration/client/wayland-egl/qwaylandeglwindow.cpp
 index 7889f575..201b583b 100644
 --- a/src/hardwareintegration/client/wayland-egl/qwaylandeglwindow.cpp
