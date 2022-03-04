@@ -1,15 +1,13 @@
 Adrien Faveraux (1):
       Move the wayland socket polling to a separate event thread
 
-Albert Astals Cid (2):
-      Fix compilation
+Albert Astals Cid (1):
       Include locale.h for setlocale/LC_CTYPE
 
-Aleix Pol (4):
+Aleix Pol (3):
       xdgshell: Tell the compositor the screen we're expecting to fill
       client: Allow QWaylandInputContext to accept composed key combinations
       Do not update the mask if we do not have a surface
-      Fix backport, context destruction was omitted
 
 Andreas Cord-Landwehr (1):
       Ensure that grabbing is performed in correct context
@@ -94,6 +92,10 @@ Rodney Dawes (1):
 
 Roman Genkhel (1):
       Check pointer for null before use in ASSERT
+
+Tarja Sundqvist (2):
+      Update commercial license headers
+      Revert "Update commercial license headers"
 
 Vlad Zahorodnii (4):
       Scanner: Avoid accessing dangling pointers in destroy_func()
@@ -2188,7 +2190,7 @@ index 5b1f4d56..0079dfef 100644
  
  }
 diff --git a/src/hardwareintegration/client/wayland-egl/qwaylandglcontext.cpp b/src/hardwareintegration/client/wayland-egl/qwaylandglcontext.cpp
-index ccebf43d..683fe123 100644
+index ccebf43d..1a1c349d 100644
 --- a/src/hardwareintegration/client/wayland-egl/qwaylandglcontext.cpp
 +++ b/src/hardwareintegration/client/wayland-egl/qwaylandglcontext.cpp
 @@ -336,6 +336,8 @@ QWaylandGLContext::QWaylandGLContext(EGLDisplay eglDisplay, QWaylandDisplay *dis
@@ -2200,18 +2202,16 @@ index ccebf43d..683fe123 100644
      updateGLFormat();
  }
  
-@@ -404,7 +406,10 @@ void QWaylandGLContext::updateGLFormat()
+@@ -404,6 +406,8 @@ void QWaylandGLContext::updateGLFormat()
  QWaylandGLContext::~QWaylandGLContext()
  {
      delete m_blitter;
-+    m_blitter = nullptr;
-     eglDestroyContext(m_eglDisplay, m_context);
 +    if (m_decorationsContext != EGL_NO_CONTEXT)
 +        eglDestroyContext(m_eglDisplay, m_decorationsContext);
+     eglDestroyContext(m_eglDisplay, m_context);
  }
  
- bool QWaylandGLContext::makeCurrent(QPlatformSurface *surface)
-@@ -439,6 +444,10 @@ bool QWaylandGLContext::makeCurrent(QPlatformSurface *surface)
+@@ -439,6 +443,10 @@ bool QWaylandGLContext::makeCurrent(QPlatformSurface *surface)
          eglSurface = window->eglSurface();
      }
  
