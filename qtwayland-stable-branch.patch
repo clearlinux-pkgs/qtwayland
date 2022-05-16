@@ -36,9 +36,10 @@ Elvis Lee (2):
       Handle registry_global out of constructor
       Connect flushRequest after forceRoundTrip
 
-Eskil Abrahamsen Blomfeldt (2):
+Eskil Abrahamsen Blomfeldt (3):
       Fix leaked subsurface wayland items
       Fix memory leak in QWaylandGLContext
+      Fix race condition when attaching client to text input
 
 Fabian Vogt (1):
       Use proper dependencies in compile tests
@@ -46,6 +47,9 @@ Fabian Vogt (1):
 Georges Basile Stavracas Neto (2):
       Client: Don't always recreate frame callbacks
       Client: Always destroy frame callback in the actual callback
+
+Hyunkook Khang (1):
+      Fix touch being ignored when down and up are in the same frame
 
 Inho Lee (1):
       Do not create decorations when the shellSurface is not ready
@@ -64,7 +68,8 @@ Jan Grulich (3):
       Get correct decoration margins region
       Client: do not empty clipboard when a new popup/window is opened
 
-Jani Heikkinen (1):
+Jani Heikkinen (2):
+      Bump version
       Bump version
 
 Joni Poikelin (1):
@@ -101,9 +106,10 @@ Rodney Dawes (1):
 Roman Genkhel (1):
       Check pointer for null before use in ASSERT
 
-Tarja Sundqvist (2):
+Tarja Sundqvist (3):
       Update commercial license headers
       Revert "Update commercial license headers"
+      Merge remote-tracking branch 'origin/tqtc/lts-5.15.4' into tqtc/lts-5.15-opensource
 
 Vlad Zahorodnii (4):
       Scanner: Avoid accessing dangling pointers in destroy_func()
@@ -1517,7 +1523,7 @@ index 10132dfe..50db6344 100644
  
  }
 diff --git a/src/client/qwaylandinputdevice.cpp b/src/client/qwaylandinputdevice.cpp
-index ed4a0eb4..aca42cdc 100644
+index ed4a0eb4..c3cc4eca 100644
 --- a/src/client/qwaylandinputdevice.cpp
 +++ b/src/client/qwaylandinputdevice.cpp
 @@ -685,6 +685,11 @@ public:
@@ -1568,6 +1574,21 @@ index ed4a0eb4..aca42cdc 100644
      mParent->mQDisplay->handleKeyboardFocusChanged(mParent);
      mRepeatTimer.stop();
  }
+@@ -1407,6 +1399,14 @@ void QWaylandInputDevice::handleTouchPoint(int id, Qt::TouchPointState state, co
+         it = mTouch->mPendingTouchPoints.insert(end, QWindowSystemInterface::TouchPoint());
+         it->id = id;
+     }
++    // If the touch points were up and down in same frame, send out frame right away
++    else if ((it->state == Qt::TouchPointPressed && state == Qt::TouchPointReleased)
++            || (it->state == Qt::TouchPointReleased && state == Qt::TouchPointPressed)) {
++        mTouch->touch_frame();
++        it = mTouch->mPendingTouchPoints.insert(mTouch->mPendingTouchPoints.end(), QWindowSystemInterface::TouchPoint());
++        it->id = id;
++    }
++
+     QWindowSystemInterface::TouchPoint &tp = *it;
+ 
+     // Only moved and pressed needs to update/set position
 diff --git a/src/client/qwaylandintegration.cpp b/src/client/qwaylandintegration.cpp
 index 7ad8e05e..fbf00c6b 100644
 --- a/src/client/qwaylandintegration.cpp
@@ -2212,6 +2233,19 @@ index bcfd5215..da95d07b 100644
          }
      },
  
+diff --git a/src/compositor/extensions/qwaylandtextinputmanager.cpp b/src/compositor/extensions/qwaylandtextinputmanager.cpp
+index 495ebae8..d9938d1f 100644
+--- a/src/compositor/extensions/qwaylandtextinputmanager.cpp
++++ b/src/compositor/extensions/qwaylandtextinputmanager.cpp
+@@ -51,6 +51,8 @@ void QWaylandTextInputManagerPrivate::zwp_text_input_manager_v2_get_text_input(R
+         textInput = new QWaylandTextInput(seat, compositor);
+     }
+     textInput->add(resource->client(), id, wl_resource_get_version(resource->handle));
++    if (!textInput->isInitialized())
++        textInput->initialize();
+ }
+ 
+ QWaylandTextInputManager::QWaylandTextInputManager()
 diff --git a/src/hardwareintegration/client/wayland-egl/qwaylandeglwindow.cpp b/src/hardwareintegration/client/wayland-egl/qwaylandeglwindow.cpp
 index 7889f575..201b583b 100644
 --- a/src/hardwareintegration/client/wayland-egl/qwaylandeglwindow.cpp
