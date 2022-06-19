@@ -78,6 +78,9 @@ Joni Poikelin (1):
 Kai Koehne (1):
       Replace remaining LGPLv3 headers in QtWaylandCompositor with GPLv3
 
+Kai Uwe Broulik (1):
+      Docs: Add "instantiates" keywords
+
 Kenneth Topp (1):
       use poll(2) when reading from clipboard
 
@@ -106,10 +109,18 @@ Rodney Dawes (1):
 Roman Genkhel (1):
       Check pointer for null before use in ASSERT
 
-Tarja Sundqvist (3):
+Samuli Piippo (1):
+      Add missing define guards
+
+Tarja Sundqvist (5):
       Update commercial license headers
       Revert "Update commercial license headers"
+      Bump version
       Merge remote-tracking branch 'origin/tqtc/lts-5.15.4' into tqtc/lts-5.15-opensource
+      Merge remote-tracking branch 'origin/tqtc/lts-5.15.5' into tqtc/lts-5.15-opensource
+
+Ulf Hermann (1):
+      Reduce memory leakage
 
 Vlad Zahorodnii (4):
       Scanner: Avoid accessing dangling pointers in destroy_func()
@@ -639,7 +650,7 @@ index 25afff79..96f07bc3 100644
  
  }
 diff --git a/src/client/qwaylanddisplay.cpp b/src/client/qwaylanddisplay.cpp
-index fe094f6f..86045a35 100644
+index fe094f6f..e8613ed8 100644
 --- a/src/client/qwaylanddisplay.cpp
 +++ b/src/client/qwaylanddisplay.cpp
 @@ -85,10 +85,203 @@
@@ -870,10 +881,15 @@ index fe094f6f..86045a35 100644
      if (mSyncCallback)
          wl_callback_destroy(mSyncCallback);
  
-@@ -189,6 +381,18 @@ QWaylandDisplay::~QWaylandDisplay(void)
+@@ -187,6 +379,21 @@ QWaylandDisplay::~QWaylandDisplay(void)
+ #endif
+     if (mDisplay)
          wl_display_disconnect(mDisplay);
- }
- 
++
++    if (m_frameEventQueue)
++        wl_event_queue_destroy(m_frameEventQueue);
++}
++
 +// Steps which is called just after constructor. This separates registry_global() out of the constructor
 +// so that factory functions in integration can be overridden.
 +void QWaylandDisplay::initialize()
@@ -884,12 +900,10 @@ index fe094f6f..86045a35 100644
 +        // Give wl_output.done and zxdg_output_v1.done events a chance to arrive
 +        forceRoundTrip();
 +    }
-+}
-+
+ }
+ 
  void QWaylandDisplay::ensureScreen()
- {
-     if (!mScreens.empty() || mPlaceholderScreen)
-@@ -203,97 +407,37 @@ void QWaylandDisplay::ensureScreen()
+@@ -203,97 +410,37 @@ void QWaylandDisplay::ensureScreen()
  
  void QWaylandDisplay::checkError() const
  {
@@ -931,10 +945,15 @@ index fe094f6f..86045a35 100644
 -{
 -    if (wl_display_dispatch(mDisplay) < 0)
 -        checkError();
--}
--
++    m_eventThread->readAndDispatchEvents();
+ }
+ 
 -void QWaylandDisplay::destroyFrameQueue(const QWaylandDisplay::FrameQueue &q)
--{
++// We have to wait until we have an eventDispatcher before creating the eventThread,
++// otherwise forceRoundTrip() may block inside _events_read() because eventThread is
++// polling.
++void QWaylandDisplay::initEventThread()
+ {
 -    QWriteLocker locker(&m_frameQueueLock);
 -    auto it = std::find_if(mExternalQueues.begin(),
 -                           mExternalQueues.end(),
@@ -944,19 +963,6 @@ index fe094f6f..86045a35 100644
 -    if (q.queue != nullptr)
 -        wl_event_queue_destroy(q.queue);
 -    delete q.mutex;
-+    m_eventThread->readAndDispatchEvents();
- }
- 
--QWaylandDisplay::FrameQueue QWaylandDisplay::createFrameQueue()
-+// We have to wait until we have an eventDispatcher before creating the eventThread,
-+// otherwise forceRoundTrip() may block inside _events_read() because eventThread is
-+// polling.
-+void QWaylandDisplay::initEventThread()
- {
--    QWriteLocker locker(&m_frameQueueLock);
--    FrameQueue q{createEventQueue()};
--    mExternalQueues.append(q);
--    return q;
 -}
 +    m_eventThread.reset(
 +            new EventThread(mDisplay, /* default queue */ nullptr, EventThread::EmitToDispatch));
@@ -964,9 +970,12 @@ index fe094f6f..86045a35 100644
 +            &QWaylandDisplay::flushRequests, Qt::QueuedConnection);
 +    m_eventThread->start();
  
--wl_event_queue *QWaylandDisplay::createEventQueue()
+-QWaylandDisplay::FrameQueue QWaylandDisplay::createFrameQueue()
 -{
--    return wl_display_create_queue(mDisplay);
+-    QWriteLocker locker(&m_frameQueueLock);
+-    FrameQueue q{createEventQueue()};
+-    mExternalQueues.append(q);
+-    return q;
 +    // wl_display_disconnect() free this.
 +    m_frameEventQueue = wl_display_create_queue(mDisplay);
 +    m_frameEventQueueThread.reset(
@@ -974,6 +983,11 @@ index fe094f6f..86045a35 100644
 +    m_frameEventQueueThread->start();
  }
  
+-wl_event_queue *QWaylandDisplay::createEventQueue()
+-{
+-    return wl_display_create_queue(mDisplay);
+-}
+-
 -void QWaylandDisplay::dispatchQueueWhile(wl_event_queue *queue, std::function<bool ()> condition, int timeout)
 +void QWaylandDisplay::blockingReadEvents()
  {
@@ -1007,7 +1021,7 @@ index fe094f6f..86045a35 100644
  }
  
  QWaylandScreen *QWaylandDisplay::screenForOutput(struct wl_output *output) const
-@@ -344,7 +488,7 @@ void QWaylandDisplay::registry_global(uint32_t id, const QString &interface, uin
+@@ -344,7 +491,7 @@ void QWaylandDisplay::registry_global(uint32_t id, const QString &interface, uin
      if (interface == QStringLiteral("wl_output")) {
          mWaitingScreens << new QWaylandScreen(this, version, id);
      } else if (interface == QStringLiteral("wl_compositor")) {
@@ -1016,7 +1030,7 @@ index fe094f6f..86045a35 100644
          mCompositor.init(registry, id, mCompositorVersion);
      } else if (interface == QStringLiteral("wl_shm")) {
          mShm.reset(new QWaylandShm(this, version, id));
-@@ -353,7 +497,7 @@ void QWaylandDisplay::registry_global(uint32_t id, const QString &interface, uin
+@@ -353,7 +500,7 @@ void QWaylandDisplay::registry_global(uint32_t id, const QString &interface, uin
          mInputDevices.append(inputDevice);
  #if QT_CONFIG(wayland_datadevice)
      } else if (interface == QStringLiteral("wl_data_device_manager")) {
@@ -1025,7 +1039,7 @@ index fe094f6f..86045a35 100644
  #endif
      } else if (interface == QStringLiteral("qt_surface_extension")) {
          mWindowExtension.reset(new QtWayland::qt_surface_extension(registry, id, 1));
-@@ -451,9 +595,10 @@ void QWaylandDisplay::addRegistryListener(RegistryListener listener, void *data)
+@@ -451,9 +598,10 @@ void QWaylandDisplay::addRegistryListener(RegistryListener listener, void *data)
  
  void QWaylandDisplay::removeListener(RegistryListener listener, void *data)
  {
@@ -1037,7 +1051,7 @@ index fe094f6f..86045a35 100644
  }
  
  uint32_t QWaylandDisplay::currentTimeMillisec()
-@@ -466,50 +611,9 @@ uint32_t QWaylandDisplay::currentTimeMillisec()
+@@ -466,50 +614,9 @@ uint32_t QWaylandDisplay::currentTimeMillisec()
      return 0;
  }
  
@@ -1089,7 +1103,7 @@ index fe094f6f..86045a35 100644
  }
  
  bool QWaylandDisplay::supportsWindowDecoration() const
-@@ -573,14 +677,10 @@ void QWaylandDisplay::handleKeyboardFocusChanged(QWaylandInputDevice *inputDevic
+@@ -573,14 +680,10 @@ void QWaylandDisplay::handleKeyboardFocusChanged(QWaylandInputDevice *inputDevic
      if (mLastKeyboardFocus == keyboardFocus)
          return;
  
@@ -1108,7 +1122,7 @@ index fe094f6f..86045a35 100644
  
      mLastKeyboardFocus = keyboardFocus;
  }
-@@ -599,6 +699,19 @@ void QWaylandDisplay::handleWaylandSync()
+@@ -599,6 +702,19 @@ void QWaylandDisplay::handleWaylandSync()
      QWindow *activeWindow = mActiveWindows.empty() ? nullptr : mActiveWindows.last()->window();
      if (activeWindow != QGuiApplication::focusWindow())
          QWindowSystemInterface::handleWindowActivated(activeWindow);
@@ -1128,7 +1142,7 @@ index fe094f6f..86045a35 100644
  }
  
  const wl_callback_listener QWaylandDisplay::syncCallbackListener = {
-@@ -625,6 +738,13 @@ QWaylandInputDevice *QWaylandDisplay::defaultInputDevice() const
+@@ -625,6 +741,13 @@ QWaylandInputDevice *QWaylandDisplay::defaultInputDevice() const
      return mInputDevices.isEmpty() ? 0 : mInputDevices.first();
  }
  
@@ -1142,7 +1156,7 @@ index fe094f6f..86045a35 100644
  #if QT_CONFIG(cursor)
  
  QWaylandCursor *QWaylandDisplay::waylandCursor()
-@@ -651,4 +771,6 @@ QWaylandCursorTheme *QWaylandDisplay::loadCursorTheme(const QString &name, int p
+@@ -651,4 +774,6 @@ QWaylandCursorTheme *QWaylandDisplay::loadCursorTheme(const QString &name, int p
  
  } // namespace QtWaylandClient
  
@@ -1333,7 +1347,7 @@ index 474fe2ab..46f629ac 100644
  private:
      QWaylandDisplay *m_display = nullptr;
 diff --git a/src/client/qwaylandinputcontext.cpp b/src/client/qwaylandinputcontext.cpp
-index e9afe05e..e290baa2 100644
+index e9afe05e..84a34674 100644
 --- a/src/client/qwaylandinputcontext.cpp
 +++ b/src/client/qwaylandinputcontext.cpp
 @@ -51,6 +51,10 @@
@@ -1360,16 +1374,18 @@ index e9afe05e..e290baa2 100644
      }
      return ret;
  }
-@@ -406,6 +412,8 @@ bool QWaylandInputContext::isValid() const
+@@ -406,6 +412,10 @@ bool QWaylandInputContext::isValid() const
  void QWaylandInputContext::reset()
  {
      qCDebug(qLcQpaInputMethods) << Q_FUNC_INFO;
++#if QT_CONFIG(xkbcommon)
 +    if (m_composeState)
 +        xkb_compose_state_reset(m_composeState);
++#endif
  
      QPlatformInputContext::reset();
  
-@@ -526,9 +534,14 @@ Qt::LayoutDirection QWaylandInputContext::inputDirection() const
+@@ -526,9 +536,14 @@ Qt::LayoutDirection QWaylandInputContext::inputDirection() const
      return textInput()->inputDirection();
  }
  
@@ -1385,7 +1401,7 @@ index e9afe05e..e290baa2 100644
  
      if (!textInput())
          return;
-@@ -561,6 +574,92 @@ QWaylandTextInput *QWaylandInputContext::textInput() const
+@@ -561,6 +576,92 @@ QWaylandTextInput *QWaylandInputContext::textInput() const
      return mDisplay->defaultInputDevice()->textInput();
  }
  
@@ -2142,6 +2158,42 @@ index ccad0048..4cc9b3b8 100644
      }
      virtual void *nativeResourceForWindow(const QByteArray &resource, QWindow *window) {
          Q_UNUSED(resource);
+diff --git a/src/compositor/compositor_api/qwaylandclient.cpp b/src/compositor/compositor_api/qwaylandclient.cpp
+index 2dba85fa..c89285dc 100644
+--- a/src/compositor/compositor_api/qwaylandclient.cpp
++++ b/src/compositor/compositor_api/qwaylandclient.cpp
+@@ -79,6 +79,7 @@ public:
+ 
+ /*!
+  * \qmltype WaylandClient
++ * \instantiates QWaylandClient
+  * \inqmlmodule QtWayland.Compositor
+  * \since 5.8
+  * \brief Represents a client connecting to the WaylandCompositor.
+diff --git a/src/compositor/compositor_api/qwaylandcompositor.cpp b/src/compositor/compositor_api/qwaylandcompositor.cpp
+index 18d8da4f..11633610 100644
+--- a/src/compositor/compositor_api/qwaylandcompositor.cpp
++++ b/src/compositor/compositor_api/qwaylandcompositor.cpp
+@@ -451,6 +451,7 @@ void QWaylandCompositorPrivate::loadServerBufferIntegration()
+ 
+ /*!
+   \qmltype WaylandCompositor
++  \instantiates QWaylandCompositor
+   \inqmlmodule QtWayland.Compositor
+   \since 5.8
+   \brief Manages the Wayland display server.
+diff --git a/src/compositor/compositor_api/qwaylandoutput.cpp b/src/compositor/compositor_api/qwaylandoutput.cpp
+index 0f5e79d8..f061afa3 100644
+--- a/src/compositor/compositor_api/qwaylandoutput.cpp
++++ b/src/compositor/compositor_api/qwaylandoutput.cpp
+@@ -249,6 +249,7 @@ QWaylandOutput::QWaylandOutput()
+ 
+ /*!
+    \qmltype WaylandOutput
++   \instantiates QWaylandOutput
+    \inqmlmodule QtWayland.Compositor
+    \since 5.8
+    \brief Provides access to a displayable area managed by the compositor.
 diff --git a/src/compositor/compositor_api/qwaylandquickcompositor.cpp b/src/compositor/compositor_api/qwaylandquickcompositor.cpp
 index 49f0860e..db1cf00f 100644
 --- a/src/compositor/compositor_api/qwaylandquickcompositor.cpp
@@ -2156,10 +2208,18 @@ index 49f0860e..db1cf00f 100644
      emit grabber->failed(QWaylandSurfaceGrabber::UnknownBufferType);
  #endif
 diff --git a/src/compositor/compositor_api/qwaylandquickitem.cpp b/src/compositor/compositor_api/qwaylandquickitem.cpp
-index 15f0195c..2218f43a 100644
+index 15f0195c..2ad53b7f 100644
 --- a/src/compositor/compositor_api/qwaylandquickitem.cpp
 +++ b/src/compositor/compositor_api/qwaylandquickitem.cpp
-@@ -737,6 +737,7 @@ void QWaylandQuickItem::handleSubsurfaceAdded(QWaylandSurface *childSurface)
+@@ -319,6 +319,7 @@ private:
+ 
+ /*!
+  * \qmltype WaylandQuickItem
++ * \instantiates QWaylandQuickItem
+  * \inqmlmodule QtWayland.Compositor
+  * \since 5.8
+  * \brief Provides a Qt Quick item that represents a WaylandView.
+@@ -737,6 +738,7 @@ void QWaylandQuickItem::handleSubsurfaceAdded(QWaylandSurface *childSurface)
          childItem->setVisible(true);
          childItem->setParentItem(this);
          connect(childSurface, &QWaylandSurface::subsurfacePositionChanged, childItem, &QWaylandQuickItem::handleSubsurfacePosition);
@@ -2167,6 +2227,42 @@ index 15f0195c..2218f43a 100644
      } else {
          bool success = QMetaObject::invokeMethod(d->subsurfaceHandler, "handleSubsurfaceAdded", Q_ARG(QWaylandSurface *, childSurface));
          if (!success)
+diff --git a/src/compositor/compositor_api/qwaylandseat.cpp b/src/compositor/compositor_api/qwaylandseat.cpp
+index 83d0335c..5090727f 100644
+--- a/src/compositor/compositor_api/qwaylandseat.cpp
++++ b/src/compositor/compositor_api/qwaylandseat.cpp
+@@ -136,6 +136,7 @@ void QWaylandSeatPrivate::seat_get_touch(wl_seat::Resource *resource, uint32_t i
+ 
+ /*!
+  * \qmltype WaylandSeat
++ * \instantiates QWaylandSeat
+  * \inqmlmodule QtWayland.Compositor
+  * \since 5.8
+  * \brief Provides access to keyboard, mouse, and touch input.
+diff --git a/src/compositor/compositor_api/qwaylandsurface.cpp b/src/compositor/compositor_api/qwaylandsurface.cpp
+index d9ebac92..b2258000 100644
+--- a/src/compositor/compositor_api/qwaylandsurface.cpp
++++ b/src/compositor/compositor_api/qwaylandsurface.cpp
+@@ -335,6 +335,7 @@ QtWayland::ClientBuffer *QWaylandSurfacePrivate::getBuffer(struct ::wl_resource
+ 
+ /*!
+  * \qmltype WaylandSurface
++ * \instantiates QWaylandSurface
+  * \inqmlmodule QtWayland.Compositor
+  * \since 5.8
+  * \brief Represents a rectangular area on an output device.
+diff --git a/src/compositor/compositor_api/qwaylandview.cpp b/src/compositor/compositor_api/qwaylandview.cpp
+index 844da7c5..1a55d589 100644
+--- a/src/compositor/compositor_api/qwaylandview.cpp
++++ b/src/compositor/compositor_api/qwaylandview.cpp
+@@ -54,6 +54,7 @@ void QWaylandViewPrivate::markSurfaceAsDestroyed(QWaylandSurface *surface)
+ 
+ /*!
+  * \qmltype WaylandView
++ * \instantiates QWaylandView
+  * \inqmlmodule QtWayland.Compositor
+  * \since 5.8
+  * \brief Represents a view of a surface on an output.
 diff --git a/src/compositor/configure.json b/src/compositor/configure.json
 index bcfd5215..da95d07b 100644
 --- a/src/compositor/configure.json
@@ -2233,6 +2329,66 @@ index bcfd5215..da95d07b 100644
          }
      },
  
+diff --git a/src/compositor/extensions/qwaylandidleinhibitv1.cpp b/src/compositor/extensions/qwaylandidleinhibitv1.cpp
+index 3d7e4d13..d17d2be0 100644
+--- a/src/compositor/extensions/qwaylandidleinhibitv1.cpp
++++ b/src/compositor/extensions/qwaylandidleinhibitv1.cpp
+@@ -51,6 +51,7 @@ QT_BEGIN_NAMESPACE
+ 
+ /*!
+     \qmltype IdleInhibitManagerV1
++    \instantiates QWaylandIdleInhibitManagerV1
+     \inqmlmodule QtWayland.Compositor
+     \since 5.14
+     \brief Provides an extension that allows to inhibit the idle behavior of the compositor.
+diff --git a/src/compositor/extensions/qwaylandiviapplication.cpp b/src/compositor/extensions/qwaylandiviapplication.cpp
+index 50242ab1..a48be3eb 100644
+--- a/src/compositor/extensions/qwaylandiviapplication.cpp
++++ b/src/compositor/extensions/qwaylandiviapplication.cpp
+@@ -40,6 +40,7 @@ QT_BEGIN_NAMESPACE
+ /*!
+  * \qmltype IviApplication
+  * \inqmlmodule QtWayland.Compositor
++ * \instantiates QWaylandIviApplication
+  * \since 5.8
+  * \brief Provides a shell extension for embedded-style user interfaces.
+  *
+diff --git a/src/compositor/extensions/qwaylandivisurface.cpp b/src/compositor/extensions/qwaylandivisurface.cpp
+index 81a7da10..01b89937 100644
+--- a/src/compositor/extensions/qwaylandivisurface.cpp
++++ b/src/compositor/extensions/qwaylandivisurface.cpp
+@@ -46,6 +46,7 @@ QWaylandSurfaceRole QWaylandIviSurfacePrivate::s_role("ivi_surface");
+ /*!
+  * \qmltype IviSurface
+  * \inqmlmodule QtWayland.Compositor
++ * \instantiates QWaylandIviSurface
+  * \since 5.8
+  * \brief Provides a simple way to identify and resize a surface.
+  *
+diff --git a/src/compositor/extensions/qwaylandquickshellsurfaceitem.cpp b/src/compositor/extensions/qwaylandquickshellsurfaceitem.cpp
+index 4952cef6..4d5b94a8 100644
+--- a/src/compositor/extensions/qwaylandquickshellsurfaceitem.cpp
++++ b/src/compositor/extensions/qwaylandquickshellsurfaceitem.cpp
+@@ -52,6 +52,7 @@ QWaylandQuickShellSurfaceItem *QWaylandQuickShellSurfaceItemPrivate::maybeCreate
+ 
+ /*!
+  * \qmltype ShellSurfaceItem
++ * \instantiates QWaylandQuickShellSurfaceItem
+  * \inherits WaylandQuickItem
+  * \inqmlmodule QtWayland.Compositor
+  * \since 5.8
+diff --git a/src/compositor/extensions/qwaylandshellsurface.cpp b/src/compositor/extensions/qwaylandshellsurface.cpp
+index 74194b35..19148874 100644
+--- a/src/compositor/extensions/qwaylandshellsurface.cpp
++++ b/src/compositor/extensions/qwaylandshellsurface.cpp
+@@ -31,6 +31,7 @@
+ 
+ /*!
+  * \qmltype ShellSurface
++ * \instantiates QWaylandShellSurface
+  * \inqmlmodule QtWayland.Compositor
+  * \since 5.8
+  * \brief Provides a common interface for surface roles specified by shell extensions.
 diff --git a/src/compositor/extensions/qwaylandtextinputmanager.cpp b/src/compositor/extensions/qwaylandtextinputmanager.cpp
 index 495ebae8..d9938d1f 100644
 --- a/src/compositor/extensions/qwaylandtextinputmanager.cpp
@@ -2246,6 +2402,86 @@ index 495ebae8..d9938d1f 100644
  }
  
  QWaylandTextInputManager::QWaylandTextInputManager()
+diff --git a/src/compositor/extensions/qwaylandwlshell.cpp b/src/compositor/extensions/qwaylandwlshell.cpp
+index 6eb1c06e..dc4856bc 100644
+--- a/src/compositor/extensions/qwaylandwlshell.cpp
++++ b/src/compositor/extensions/qwaylandwlshell.cpp
+@@ -245,6 +245,7 @@ void QWaylandWlShellSurfacePrivate::shell_surface_set_class(Resource *resource,
+ /*!
+  * \qmltype WlShell
+  * \inqmlmodule QtWayland.Compositor
++ * \instantiates QWaylandWlShell
+  * \since 5.8
+  * \brief Provides an extension for desktop-style user interfaces.
+  *
+@@ -414,6 +415,7 @@ QByteArray QWaylandWlShell::interfaceName()
+ /*!
+  * \qmltype WlShellSurface
+  * \inqmlmodule QtWayland.Compositor
++ * \instantiates QWaylandWlShellSurface
+  * \since 5.8
+  * \brief Provides a \c wl_shell_surface that offers desktop-style compositor-specific features to a surface.
+  *
+diff --git a/src/compositor/extensions/qwaylandxdgdecorationv1.cpp b/src/compositor/extensions/qwaylandxdgdecorationv1.cpp
+index 9fb2c955..57fcd29e 100644
+--- a/src/compositor/extensions/qwaylandxdgdecorationv1.cpp
++++ b/src/compositor/extensions/qwaylandxdgdecorationv1.cpp
+@@ -40,6 +40,7 @@ QT_BEGIN_NAMESPACE
+ /*!
+     \qmltype XdgDecorationManagerV1
+     \inqmlmodule QtWayland.Compositor
++    \instantiates QWaylandXdgDecorationManagerV1
+     \since 5.12
+     \brief Provides an extension for negotiation of server-side and client-side window decorations.
+ 
+diff --git a/src/compositor/extensions/qwaylandxdgoutputv1.cpp b/src/compositor/extensions/qwaylandxdgoutputv1.cpp
+index a78a9f62..dd8f2aac 100644
+--- a/src/compositor/extensions/qwaylandxdgoutputv1.cpp
++++ b/src/compositor/extensions/qwaylandxdgoutputv1.cpp
+@@ -39,6 +39,7 @@ QT_BEGIN_NAMESPACE
+ /*!
+  * \qmltype XdgOutputManagerV1
+  * \inqmlmodule QtWayland.Compositor
++ * \instantiates QWaylandXdgOutputManagerV1
+  * \since 5.14
+  * \brief Provides an extension for describing outputs in a desktop oriented fashion.
+  *
+diff --git a/src/compositor/extensions/qwaylandxdgshell.cpp b/src/compositor/extensions/qwaylandxdgshell.cpp
+index e1888529..7d4e1e9a 100644
+--- a/src/compositor/extensions/qwaylandxdgshell.cpp
++++ b/src/compositor/extensions/qwaylandxdgshell.cpp
+@@ -135,6 +135,7 @@ void QWaylandXdgShellPrivate::xdg_wm_base_pong(Resource *resource, uint32_t seri
+ /*!
+  * \qmltype XdgShell
+  * \inqmlmodule QtWayland.Compositor
++ * \instantiates QWaylandXdgShell
+  * \since 5.12
+  * \brief Provides an extension for desktop-style user interfaces.
+  *
+@@ -455,6 +456,7 @@ void QWaylandXdgSurfacePrivate::xdg_surface_set_window_geometry(QtWaylandServer:
+ /*!
+  * \qmltype XdgSurface
+  * \inqmlmodule QtWayland.Compositor
++ * \instantiates QWaylandXdgSurface
+  * \since 5.12
+  * \brief XdgSurface provides desktop-style compositor-specific features to an xdg surface.
+  *
+@@ -704,6 +706,7 @@ QWaylandQuickShellIntegration *QWaylandXdgSurface::createIntegration(QWaylandQui
+ /*!
+  * \qmltype XdgToplevel
+  * \inqmlmodule QtWayland.Compositor
++ * \instantiates QWaylandXdgToplevel
+  * \since 5.12
+  * \brief XdgToplevel represents the toplevel window specific parts of an xdg surface.
+  *
+@@ -1541,6 +1544,7 @@ void QWaylandXdgToplevelPrivate::xdg_toplevel_set_minimized(QtWaylandServer::xdg
+ /*!
+  * \qmltype XdgPopup
+  * \inqmlmodule QtWayland.Compositor
++ * \instantiates QWaylandXdgPopup
+  * \since 5.12
+  * \brief XdgPopup represents the popup specific parts of and xdg surface.
+  *
 diff --git a/src/hardwareintegration/client/wayland-egl/qwaylandeglwindow.cpp b/src/hardwareintegration/client/wayland-egl/qwaylandeglwindow.cpp
 index 7889f575..201b583b 100644
 --- a/src/hardwareintegration/client/wayland-egl/qwaylandeglwindow.cpp
