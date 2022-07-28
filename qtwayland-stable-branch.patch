@@ -125,17 +125,21 @@ Tarja Sundqvist (5):
 Ulf Hermann (1):
       Reduce memory leakage
 
+Ville Voutilainen (1):
+      Build fixes for GCC 11
+
 Vlad Zahorodnii (4):
       Scanner: Avoid accessing dangling pointers in destroy_func()
       Client: Announce an output after receiving more complete state
       Client: Remove mWaitingForUpdateDelivery
       Client: Fix opaque region setter
 
-Weng Xuetian (4):
+Weng Xuetian (5):
       Use qWarning and _exit() instead of qFatal for wayland error
       Set preedit cursor when cursor equals to 0
       Cursor position == 0 should still show the cursor
       Update the preedit styling mapping
+      Only close popup in the the hierchary
 
 Zhang Liang (1):
       Fix: remove listener
@@ -1787,7 +1791,7 @@ index df1c94f2..050cfdc0 100644
  
  #if QT_CONFIG(cursor)
 diff --git a/src/client/qwaylandwindow.cpp b/src/client/qwaylandwindow.cpp
-index bc031ed5..ceaa4c73 100644
+index bc031ed5..c90a0ebf 100644
 --- a/src/client/qwaylandwindow.cpp
 +++ b/src/client/qwaylandwindow.cpp
 @@ -76,7 +76,6 @@ QWaylandWindow *QWaylandWindow::mMouseGrab = nullptr;
@@ -1822,7 +1826,15 @@ index bc031ed5..ceaa4c73 100644
      setMask(window()->mask());
      if (mShellSurface)
          mShellSurface->requestWindowStates(window()->windowStates());
-@@ -265,6 +262,8 @@ void QWaylandWindow::reset()
+@@ -242,6 +239,7 @@ bool QWaylandWindow::shouldCreateSubSurface() const
+ 
+ void QWaylandWindow::reset()
+ {
++    closeChildPopups();
+     delete mShellSurface;
+     mShellSurface = nullptr;
+     delete mSubSurfaceWindow;
+@@ -265,6 +263,8 @@ void QWaylandWindow::reset()
  
      mMask = QRegion();
      mQueuedBuffer = nullptr;
@@ -1831,7 +1843,7 @@ index bc031ed5..ceaa4c73 100644
  }
  
  QWaylandWindow *QWaylandWindow::fromWlSurface(::wl_surface *surface)
-@@ -332,14 +331,21 @@ void QWaylandWindow::setWindowIcon(const QIcon &icon)
+@@ -332,14 +332,21 @@ void QWaylandWindow::setWindowIcon(const QIcon &icon)
  
  void QWaylandWindow::setGeometry_helper(const QRect &rect)
  {
@@ -1856,7 +1868,7 @@ index bc031ed5..ceaa4c73 100644
      }
  }
  
-@@ -362,11 +368,11 @@ void QWaylandWindow::setGeometry(const QRect &rect)
+@@ -362,11 +369,11 @@ void QWaylandWindow::setGeometry(const QRect &rect)
      if (isExposed() && !mInResizeFromApplyConfigure && exposeGeometry != mLastExposeGeometry)
          sendExposeEvent(exposeGeometry);
  
@@ -1870,9 +1882,34 @@ index bc031ed5..ceaa4c73 100644
  }
  
  void QWaylandWindow::resizeFromApplyConfigure(const QSize &sizeWithMargins, const QPoint &offset)
-@@ -427,9 +433,8 @@ void QWaylandWindow::setVisible(bool visible)
-         if (window()->type() == Qt::Popup || window()->type() == Qt::ToolTip)
-             activePopups << this;
+@@ -391,21 +398,6 @@ void QWaylandWindow::sendExposeEvent(const QRect &rect)
+     mLastExposeGeometry = rect;
+ }
+ 
+-
+-static QVector<QPointer<QWaylandWindow>> activePopups;
+-
+-void QWaylandWindow::closePopups(QWaylandWindow *parent)
+-{
+-    while (!activePopups.isEmpty()) {
+-        auto popup = activePopups.takeLast();
+-        if (popup.isNull())
+-            continue;
+-        if (popup.data() == parent)
+-            return;
+-        popup->reset();
+-    }
+-}
+-
+ QPlatformScreen *QWaylandWindow::calculateScreenFromSurfaceEvents() const
+ {
+     if (mSurface) {
+@@ -424,18 +416,14 @@ void QWaylandWindow::setVisible(bool visible)
+     lastVisible = visible;
+ 
+     if (visible) {
+-        if (window()->type() == Qt::Popup || window()->type() == Qt::ToolTip)
+-            activePopups << this;
          initWindow();
 -        mDisplay->flushRequests();
  
@@ -1881,7 +1918,13 @@ index bc031ed5..ceaa4c73 100644
          // Don't flush the events here, or else the newly visible window may start drawing, but since
          // there was no frame before it will be stuck at the waitForFrameSync() in
          // QWaylandShmBackingStore::beginPaint().
-@@ -456,14 +461,15 @@ void QWaylandWindow::lower()
+     } else {
+         sendExposeEvent(QRect());
+-        closePopups(this);
+         reset();
+     }
+ }
+@@ -456,14 +444,15 @@ void QWaylandWindow::lower()
  
  void QWaylandWindow::setMask(const QRegion &mask)
  {
@@ -1900,7 +1943,7 @@ index bc031ed5..ceaa4c73 100644
      if (mMask.isEmpty()) {
          mSurface->set_input_region(nullptr);
  
-@@ -546,8 +552,8 @@ void QWaylandWindow::sendRecursiveExposeEvent()
+@@ -546,8 +535,8 @@ void QWaylandWindow::sendRecursiveExposeEvent()
  
  void QWaylandWindow::attach(QWaylandBuffer *buffer, int x, int y)
  {
@@ -1910,7 +1953,7 @@ index bc031ed5..ceaa4c73 100644
          handleUpdate();
          buffer->setBusy();
  
-@@ -565,7 +571,11 @@ void QWaylandWindow::attachOffset(QWaylandBuffer *buffer)
+@@ -565,7 +554,11 @@ void QWaylandWindow::attachOffset(QWaylandBuffer *buffer)
  
  void QWaylandWindow::damage(const QRect &rect)
  {
@@ -1923,7 +1966,7 @@ index bc031ed5..ceaa4c73 100644
  }
  
  void QWaylandWindow::safeCommit(QWaylandBuffer *buffer, const QRegion &damage)
-@@ -599,8 +609,14 @@ void QWaylandWindow::commit(QWaylandBuffer *buffer, const QRegion &damage)
+@@ -599,8 +592,14 @@ void QWaylandWindow::commit(QWaylandBuffer *buffer, const QRegion &damage)
          return;
  
      attachOffset(buffer);
@@ -1940,7 +1983,7 @@ index bc031ed5..ceaa4c73 100644
      Q_ASSERT(!buffer->committed());
      buffer->setCommitted();
      mSurface->commit();
-@@ -613,42 +629,50 @@ void QWaylandWindow::commit()
+@@ -613,42 +612,50 @@ void QWaylandWindow::commit()
  
  const wl_callback_listener QWaylandWindow::callbackListener = {
      [](void *data, wl_callback *callback, uint32_t time) {
@@ -2006,7 +2049,7 @@ index bc031ed5..ceaa4c73 100644
  
      if (mWaitingForFrameCallback) {
          qCDebug(lcWaylandBackingstore) << "Didn't receive frame callback in time, window should now be inexposed";
-@@ -797,7 +821,7 @@ bool QWaylandWindow::createDecoration()
+@@ -797,7 +804,7 @@ bool QWaylandWindow::createDecoration()
          decoration = false;
      if (mSubSurfaceWindow)
          decoration = false;
@@ -2015,7 +2058,7 @@ index bc031ed5..ceaa4c73 100644
          decoration = false;
  
      bool hadDecoration = mWindowDecoration;
-@@ -1070,10 +1094,18 @@ bool QWaylandWindow::setMouseGrabEnabled(bool grab)
+@@ -1070,10 +1077,18 @@ bool QWaylandWindow::setMouseGrabEnabled(bool grab)
      return true;
  }
  
@@ -2035,7 +2078,7 @@ index bc031ed5..ceaa4c73 100644
      mLastReportedWindowStates = states;
  }
  
-@@ -1136,8 +1168,11 @@ void QWaylandWindow::requestUpdate()
+@@ -1136,8 +1151,11 @@ void QWaylandWindow::requestUpdate()
      Q_ASSERT(hasPendingUpdateRequest()); // should be set by QPA
  
      // If we have a frame callback all is good and will be taken care of there
@@ -2049,7 +2092,7 @@ index bc031ed5..ceaa4c73 100644
  
      // If we've already called deliverUpdateRequest(), but haven't seen any attach+commit/swap yet
      // This is a somewhat redundant behavior and might indicate a bug in the calling code, so log
-@@ -1150,7 +1185,12 @@ void QWaylandWindow::requestUpdate()
+@@ -1150,7 +1168,12 @@ void QWaylandWindow::requestUpdate()
      // so use invokeMethod to delay the delivery a bit.
      QMetaObject::invokeMethod(this, [this] {
          // Things might have changed in the meantime
@@ -2063,7 +2106,7 @@ index bc031ed5..ceaa4c73 100644
              deliverUpdateRequest();
      }, Qt::QueuedConnection);
  }
-@@ -1161,19 +1201,19 @@ void QWaylandWindow::requestUpdate()
+@@ -1161,19 +1184,19 @@ void QWaylandWindow::requestUpdate()
  void QWaylandWindow::handleUpdate()
  {
      qCDebug(lcWaylandBackingstore) << "handleUpdate" << QThread::currentThread();
@@ -2089,7 +2132,7 @@ index bc031ed5..ceaa4c73 100644
      mFrameCallback = wl_surface_frame(wrappedSurface);
      wl_proxy_wrapper_destroy(wrappedSurface);
      wl_callback_add_listener(mFrameCallback, &QWaylandWindow::callbackListener, this);
-@@ -1183,6 +1223,8 @@ void QWaylandWindow::handleUpdate()
+@@ -1183,6 +1206,8 @@ void QWaylandWindow::handleUpdate()
      // Start a timer for handling the case when the compositor stops sending frame callbacks.
      if (mFrameCallbackTimeout > 0) {
          QMetaObject::invokeMethod(this, [this] {
@@ -2098,7 +2141,7 @@ index bc031ed5..ceaa4c73 100644
              if (mWaitingForFrameCallback) {
                  if (mFrameCallbackCheckIntervalTimerId < 0)
                      mFrameCallbackCheckIntervalTimerId = startTimer(mFrameCallbackTimeout);
-@@ -1231,12 +1273,14 @@ bool QWaylandWindow::isOpaque() const
+@@ -1231,16 +1256,32 @@ bool QWaylandWindow::isOpaque() const
  
  void QWaylandWindow::setOpaqueArea(const QRegion &opaqueArea)
  {
@@ -2116,8 +2159,26 @@ index bc031ed5..ceaa4c73 100644
      mSurface->set_opaque_region(region);
      wl_region_destroy(region);
  }
+ 
++void QWaylandWindow::addChildPopup(QWaylandWindow *surface) {
++    mChildPopups.append(surface);
++}
++
++void QWaylandWindow::removeChildPopup(QWaylandWindow *surface) {
++    mChildPopups.removeAll(surface);
++}
++
++void QWaylandWindow::closeChildPopups() {
++    while (!mChildPopups.isEmpty()) {
++        auto popup = mChildPopups.takeLast();
++        popup->reset();
++    }
++}
+ }
+ 
+ QT_END_NAMESPACE
 diff --git a/src/client/qwaylandwindow_p.h b/src/client/qwaylandwindow_p.h
-index 6cc1664b..cb9135f6 100644
+index 6cc1664b..d211178a 100644
 --- a/src/client/qwaylandwindow_p.h
 +++ b/src/client/qwaylandwindow_p.h
 @@ -148,6 +148,7 @@ public:
@@ -2128,7 +2189,18 @@ index 6cc1664b..cb9135f6 100644
  
      void raise() override;
      void lower() override;
-@@ -227,11 +228,11 @@ protected:
+@@ -206,6 +207,10 @@ public:
+     void handleUpdate();
+     void deliverUpdateRequest() override;
+ 
++    void addChildPopup(QWaylandWindow* child);
++    void removeChildPopup(QWaylandWindow* child);
++    void closeChildPopups();
++
+ public slots:
+     void applyConfigure();
+ 
+@@ -227,11 +232,11 @@ protected:
      WId mWindowId;
      bool mWaitingForFrameCallback = false;
      bool mFrameCallbackTimedOut = false; // Whether the frame callback has timed out
@@ -2142,6 +2214,15 @@ index 6cc1664b..cb9135f6 100644
      QWaitCondition mFrameSyncWait;
  
      // True when we have called deliverRequestUpdate, but the client has not yet attached a new buffer
+@@ -261,6 +266,8 @@ protected:
+     QWaylandBuffer *mQueuedBuffer = nullptr;
+     QRegion mQueuedBufferDamage;
+ 
++    QList<QPointer<QWaylandWindow>> mChildPopups;
++
+ private:
+     void setGeometry_helper(const QRect &rect);
+     void initWindow();
 diff --git a/src/client/shellintegration/qwaylandshellintegration_p.h b/src/client/shellintegration/qwaylandshellintegration_p.h
 index ccad0048..4cc9b3b8 100644
 --- a/src/client/shellintegration/qwaylandshellintegration_p.h
@@ -2590,6 +2671,67 @@ index 245fec19..8f41118d 100644
      }
  
      if (m_pending.states != m_applied.states)
+diff --git a/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgpopupv5.cpp b/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgpopupv5.cpp
+index 85d25e3c..60bdd491 100644
+--- a/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgpopupv5.cpp
++++ b/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgpopupv5.cpp
+@@ -47,18 +47,21 @@ QT_BEGIN_NAMESPACE
+ 
+ namespace QtWaylandClient {
+ 
+-QWaylandXdgPopupV5::QWaylandXdgPopupV5(struct ::xdg_popup_v5 *popup, QWaylandWindow *window)
++QWaylandXdgPopupV5::QWaylandXdgPopupV5(struct ::xdg_popup_v5 *popup, QWaylandWindow* parent, QWaylandWindow *window)
+     : QWaylandShellSurface(window)
+     , QtWayland::xdg_popup_v5(popup)
++    , m_parent(parent)
+     , m_window(window)
+ {
+     if (window->display()->windowExtension())
+         m_extendedWindow = new QWaylandExtendedSurface(window);
++    m_parent->addChildPopup(m_window);
+ }
+ 
+ QWaylandXdgPopupV5::~QWaylandXdgPopupV5()
+ {
+     xdg_popup_destroy(object());
++    m_parent->removeChildPopup(m_window);
+     delete m_extendedWindow;
+ }
+ 
+diff --git a/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgpopupv5_p.h b/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgpopupv5_p.h
+index 7494f6a6..d85f130b 100644
+--- a/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgpopupv5_p.h
++++ b/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgpopupv5_p.h
+@@ -70,7 +70,7 @@ class Q_WAYLAND_CLIENT_EXPORT QWaylandXdgPopupV5 : public QWaylandShellSurface
+ {
+     Q_OBJECT
+ public:
+-    QWaylandXdgPopupV5(struct ::xdg_popup_v5 *popup, QWaylandWindow *window);
++    QWaylandXdgPopupV5(struct ::xdg_popup_v5 *popup, QWaylandWindow* parent, QWaylandWindow *window);
+     ~QWaylandXdgPopupV5() override;
+ 
+ protected:
+@@ -78,6 +78,7 @@ protected:
+ 
+ private:
+     QWaylandExtendedSurface *m_extendedWindow = nullptr;
++    QWaylandWindow *m_parent = nullptr;
+     QWaylandWindow *m_window = nullptr;
+ };
+ 
+diff --git a/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgshellv5.cpp b/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgshellv5.cpp
+index 7e242c4a..def8452a 100644
+--- a/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgshellv5.cpp
++++ b/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgshellv5.cpp
+@@ -84,7 +84,7 @@ QWaylandXdgPopupV5 *QWaylandXdgShellV5::createXdgPopup(QWaylandWindow *window, Q
+     int x = position.x() + parentWindow->frameMargins().left();
+     int y = position.y() + parentWindow->frameMargins().top();
+ 
+-    auto popup = new QWaylandXdgPopupV5(get_xdg_popup(window->wlSurface(), parentSurface, seat, m_popupSerial, x, y), window);
++    auto popup = new QWaylandXdgPopupV5(get_xdg_popup(window->wlSurface(), parentSurface, seat, m_popupSerial, x, y), parentWindow, window);
+     m_popups.append(window);
+     QObject::connect(popup, &QWaylandXdgPopupV5::destroyed, [this, window](){
+         m_popups.removeOne(window);
 diff --git a/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgshellv5integration.cpp b/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgshellv5integration.cpp
 index 4e25949f..cfc60939 100644
 --- a/src/plugins/shellintegration/xdg-shell-v5/qwaylandxdgshellv5integration.cpp
@@ -2634,7 +2776,7 @@ index 770fad7e..73aba1ee 100644
      if ((m_pending.states & Qt::WindowActive) && !(m_acked.states & Qt::WindowActive))
          m_window->display()->handleWindowActivated(m_window);
 diff --git a/src/plugins/shellintegration/xdg-shell-v6/qwaylandxdgshellv6.cpp b/src/plugins/shellintegration/xdg-shell-v6/qwaylandxdgshellv6.cpp
-index c137b308..8c371661 100644
+index c137b308..151c78e3 100644
 --- a/src/plugins/shellintegration/xdg-shell-v6/qwaylandxdgshellv6.cpp
 +++ b/src/plugins/shellintegration/xdg-shell-v6/qwaylandxdgshellv6.cpp
 @@ -72,7 +72,7 @@ QWaylandXdgSurfaceV6::Toplevel::~Toplevel()
@@ -2646,6 +2788,23 @@ index c137b308..8c371661 100644
  
      if ((m_pending.states & Qt::WindowActive) && !(m_applied.states & Qt::WindowActive))
          m_xdgSurface->m_window->display()->handleWindowActivated(m_xdgSurface->m_window);
+@@ -174,6 +174,7 @@ QWaylandXdgSurfaceV6::Popup::Popup(QWaylandXdgSurfaceV6 *xdgSurface, QWaylandXdg
+     , m_xdgSurface(xdgSurface)
+     , m_parent(parent)
+ {
++    m_parent->window()->addChildPopup(m_xdgSurface->window());
+ }
+ 
+ QWaylandXdgSurfaceV6::Popup::~Popup()
+@@ -181,6 +182,8 @@ QWaylandXdgSurfaceV6::Popup::~Popup()
+     if (isInitialized())
+         destroy();
+ 
++    m_parent->window()->removeChildPopup(m_xdgSurface->window());
++
+     if (m_grabbing) {
+         auto *shell = m_xdgSurface->m_shell;
+         Q_ASSERT(shell->m_topmostGrabbingPopup == this);
 diff --git a/src/plugins/shellintegration/xdg-shell-v6/qwaylandxdgshellv6integration.cpp b/src/plugins/shellintegration/xdg-shell-v6/qwaylandxdgshellv6integration.cpp
 index 03164316..e8da8ba1 100644
 --- a/src/plugins/shellintegration/xdg-shell-v6/qwaylandxdgshellv6integration.cpp
@@ -2684,7 +2843,7 @@ index 261f8cbb..c1bcd5c6 100644
  private:
      QScopedPointer<QWaylandXdgShellV6> m_xdgShell;
 diff --git a/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell.cpp b/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell.cpp
-index b6d23ac1..d7d0ddf7 100644
+index b6d23ac1..3999a5ee 100644
 --- a/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell.cpp
 +++ b/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell.cpp
 @@ -67,11 +67,6 @@ QWaylandXdgSurface::Toplevel::Toplevel(QWaylandXdgSurface *xdgSurface)
@@ -2749,7 +2908,44 @@ index b6d23ac1..d7d0ddf7 100644
              unset_fullscreen();
      }
  
-@@ -254,6 +249,7 @@ QWaylandXdgSurface::QWaylandXdgSurface(QWaylandXdgShell *shell, ::xdg_surface *s
+@@ -200,12 +195,17 @@ QtWayland::xdg_toplevel::resize_edge QWaylandXdgSurface::Toplevel::convertToResi
+                 | ((edges & Qt::RightEdge) ? resize_edge_right : 0));
+ }
+ 
+-QWaylandXdgSurface::Popup::Popup(QWaylandXdgSurface *xdgSurface, QWaylandXdgSurface *parent,
++QWaylandXdgSurface::Popup::Popup(QWaylandXdgSurface *xdgSurface, QWaylandWindow *parent,
+                                  QtWayland::xdg_positioner *positioner)
+-    : xdg_popup(xdgSurface->get_popup(parent->object(), positioner->object()))
+-    , m_xdgSurface(xdgSurface)
++    : m_xdgSurface(xdgSurface)
++    , m_parentXdgSurface(qobject_cast<QWaylandXdgSurface *>(parent->shellSurface()))
+     , m_parent(parent)
+ {
++
++    init(xdgSurface->get_popup(m_parentXdgSurface ? m_parentXdgSurface->object() : nullptr, positioner->object()));
++    if (m_parent) {
++        m_parent->addChildPopup(m_xdgSurface->window());
++    }
+ }
+ 
+ QWaylandXdgSurface::Popup::~Popup()
+@@ -213,10 +213,14 @@ QWaylandXdgSurface::Popup::~Popup()
+     if (isInitialized())
+         destroy();
+ 
++    if (m_parent) {
++        m_parent->removeChildPopup(m_xdgSurface->window());
++    }
++
+     if (m_grabbing) {
+         auto *shell = m_xdgSurface->m_shell;
+         Q_ASSERT(shell->m_topmostGrabbingPopup == this);
+-        shell->m_topmostGrabbingPopup = m_parent->m_popup;
++        shell->m_topmostGrabbingPopup = m_parentXdgSurface ? m_parentXdgSurface->m_popup : nullptr;
+     }
+ }
+ 
+@@ -254,6 +258,7 @@ QWaylandXdgSurface::QWaylandXdgSurface(QWaylandXdgShell *shell, ::xdg_surface *s
                  m_toplevel->set_parent(parentXdgSurface->m_toplevel->object());
          }
      }
@@ -2757,6 +2953,48 @@ index b6d23ac1..d7d0ddf7 100644
  }
  
  QWaylandXdgSurface::~QWaylandXdgSurface()
+@@ -396,8 +401,6 @@ void QWaylandXdgSurface::setPopup(QWaylandWindow *parent)
+ {
+     Q_ASSERT(!m_toplevel && !m_popup);
+ 
+-    auto parentXdgSurface = static_cast<QWaylandXdgSurface *>(parent->shellSurface());
+-
+     auto positioner = new QtWayland::xdg_positioner(m_shell->create_positioner());
+     // set_popup expects a position relative to the parent
+     QPoint transientPos = m_window->geometry().topLeft(); // this is absolute
+@@ -410,8 +413,9 @@ void QWaylandXdgSurface::setPopup(QWaylandWindow *parent)
+     positioner->set_anchor(QtWayland::xdg_positioner::anchor_top_left);
+     positioner->set_gravity(QtWayland::xdg_positioner::gravity_bottom_right);
+     positioner->set_size(m_window->geometry().width(), m_window->geometry().height());
+-    m_popup = new Popup(this, parentXdgSurface, positioner);
++    m_popup = new Popup(this, parent, positioner);
+     positioner->destroy();
++
+     delete positioner;
+ }
+ 
+diff --git a/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell_p.h b/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell_p.h
+index 0c98be35..28ff76ba 100644
+--- a/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell_p.h
++++ b/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell_p.h
+@@ -131,14 +131,15 @@ private:
+ 
+     class Popup : public QtWayland::xdg_popup {
+     public:
+-        Popup(QWaylandXdgSurface *xdgSurface, QWaylandXdgSurface *parent, QtWayland::xdg_positioner *positioner);
++        Popup(QWaylandXdgSurface *xdgSurface, QWaylandWindow *parent, QtWayland::xdg_positioner *positioner);
+         ~Popup() override;
+ 
+         void grab(QWaylandInputDevice *seat, uint serial);
+         void xdg_popup_popup_done() override;
+ 
+         QWaylandXdgSurface *m_xdgSurface = nullptr;
+-        QWaylandXdgSurface *m_parent = nullptr;
++        QWaylandXdgSurface *m_parentXdgSurface = nullptr;
++        QWaylandWindow *m_parent = nullptr;
+         bool m_grabbing = false;
+     };
+ 
 diff --git a/src/plugins/shellintegration/xdg-shell/qwaylandxdgshellintegration.cpp b/src/plugins/shellintegration/xdg-shell/qwaylandxdgshellintegration.cpp
 index 8769d971..da0dd6a7 100644
 --- a/src/plugins/shellintegration/xdg-shell/qwaylandxdgshellintegration.cpp
@@ -2909,6 +3147,18 @@ index 1568b3b9..067410d0 100644
  
  class DataDeviceCompositor : public DefaultCompositor {
  public:
+diff --git a/tests/auto/client/shared/corecompositor.cpp b/tests/auto/client/shared/corecompositor.cpp
+index 5c6c83ba..fa9b7662 100644
+--- a/tests/auto/client/shared/corecompositor.cpp
++++ b/tests/auto/client/shared/corecompositor.cpp
+@@ -27,6 +27,7 @@
+ ****************************************************************************/
+ 
+ #include "corecompositor.h"
++#include <thread>
+ 
+ namespace MockCompositor {
+ 
 diff --git a/tests/auto/client/shared/coreprotocol.h b/tests/auto/client/shared/coreprotocol.h
 index a1af137a..296dbf47 100644
 --- a/tests/auto/client/shared/coreprotocol.h
@@ -3020,7 +3270,7 @@ index b8a65f15..95e4e609 100644
  
  // Used to cause a crash in libwayland (QTBUG-79674)
 diff --git a/tests/auto/client/xdgshell/tst_xdgshell.cpp b/tests/auto/client/xdgshell/tst_xdgshell.cpp
-index 2277bbb8..73d1eb9c 100644
+index 2277bbb8..747875b4 100644
 --- a/tests/auto/client/xdgshell/tst_xdgshell.cpp
 +++ b/tests/auto/client/xdgshell/tst_xdgshell.cpp
 @@ -31,6 +31,7 @@
@@ -3031,7 +3281,15 @@ index 2277bbb8..73d1eb9c 100644
  
  using namespace MockCompositor;
  
-@@ -138,6 +139,7 @@ void tst_xdgshell::configureSize()
+@@ -45,6 +46,7 @@ private slots:
+     void configureStates();
+     void popup();
+     void tooltipOnPopup();
++    void tooltipAndSiblingPopup();
+     void switchPopups();
+     void hidePopupParent();
+     void pongs();
+@@ -138,6 +140,7 @@ void tst_xdgshell::configureSize()
  
  void tst_xdgshell::configureStates()
  {
@@ -3039,7 +3297,7 @@ index 2277bbb8..73d1eb9c 100644
      QRasterWindow window;
      window.resize(64, 48);
      window.show();
-@@ -154,9 +156,12 @@ void tst_xdgshell::configureStates()
+@@ -154,9 +157,12 @@ void tst_xdgshell::configureStates()
      // Toplevel windows don't know their position on xdg-shell
  //    QCOMPARE(window.frameGeometry().topLeft(), QPoint()); // TODO: this doesn't currently work when window decorations are enabled
  
@@ -3055,7 +3313,7 @@ index 2277bbb8..73d1eb9c 100644
  
      const QSize screenSize(640, 480);
      const uint maximizedSerial = exec([=] {
-@@ -186,6 +191,7 @@ void tst_xdgshell::configureStates()
+@@ -186,6 +192,7 @@ void tst_xdgshell::configureStates()
      QCOMPARE(window.windowStates(), Qt::WindowNoState);
      QCOMPARE(window.frameGeometry().size(), windowedSize);
  //    QCOMPARE(window.frameGeometry().topLeft(), QPoint()); // TODO: this doesn't currently work when window decorations are enabled
@@ -3063,7 +3321,100 @@ index 2277bbb8..73d1eb9c 100644
  }
  
  void tst_xdgshell::popup()
-@@ -505,7 +511,7 @@ void tst_xdgshell::minMaxSize()
+@@ -340,6 +347,92 @@ void tst_xdgshell::tooltipOnPopup()
+     QCOMPOSITOR_TRY_COMPARE(xdgPopup(0), nullptr);
+ }
+ 
++void tst_xdgshell::tooltipAndSiblingPopup()
++{
++    class ToolTip : public QRasterWindow {
++    public:
++        explicit ToolTip(QWindow *parent) {
++            setTransientParent(parent);
++            setFlags(Qt::ToolTip);
++            resize(100, 100);
++            show();
++        }
++        void mousePressEvent(QMouseEvent *event) override {
++            QRasterWindow::mousePressEvent(event);
++            m_popup = new QRasterWindow;
++            m_popup->setTransientParent(transientParent());
++            m_popup->setFlags(Qt::Popup);
++            m_popup->resize(100, 100);
++            m_popup->show();
++        }
++
++        QRasterWindow *m_popup = nullptr;
++    };
++
++    class Window : public QRasterWindow {
++    public:
++        void mousePressEvent(QMouseEvent *event) override {
++            QRasterWindow::mousePressEvent(event);
++            m_tooltip = new ToolTip(this);
++        }
++        ToolTip *m_tooltip = nullptr;
++    };
++
++    Window window;
++    window.resize(200, 200);
++    window.show();
++
++    QCOMPOSITOR_TRY_VERIFY(xdgToplevel());
++    exec([=] { xdgToplevel()->sendCompleteConfigure(); });
++    QCOMPOSITOR_TRY_VERIFY(xdgToplevel()->m_xdgSurface->m_committedConfigureSerial);
++
++    exec([=] {
++        auto *surface = xdgToplevel()->surface();
++        auto *p = pointer();
++        auto *c = client();
++        p->sendEnter(surface, {100, 100});
++        p->sendFrame(c);
++        p->sendButton(client(), BTN_LEFT, Pointer::button_state_pressed);
++        p->sendButton(client(), BTN_LEFT, Pointer::button_state_released);
++        p->sendFrame(c);
++        p->sendLeave(surface);
++        p->sendFrame(c);
++    });
++
++    QCOMPOSITOR_TRY_VERIFY(xdgPopup());
++    exec([=] { xdgPopup()->sendCompleteConfigure(QRect(100, 100, 100, 100)); });
++    QCOMPOSITOR_TRY_VERIFY(xdgPopup()->m_xdgSurface->m_committedConfigureSerial);
++    QCOMPOSITOR_TRY_VERIFY(!xdgPopup()->m_grabbed);
++
++    exec([=] {
++        auto *surface = xdgPopup()->surface();
++        auto *p = pointer();
++        auto *c = client();
++        p->sendEnter(surface, {100, 100});
++        p->sendFrame(c);
++        p->sendButton(client(), BTN_LEFT, Pointer::button_state_pressed);
++        p->sendButton(client(), BTN_LEFT, Pointer::button_state_released);
++        p->sendFrame(c);
++    });
++
++    QCOMPOSITOR_TRY_VERIFY(xdgPopup(1));
++    exec([=] { xdgPopup(1)->sendCompleteConfigure(QRect(100, 100, 100, 100)); });
++    QCOMPOSITOR_TRY_VERIFY(xdgPopup(1)->m_xdgSurface->m_committedConfigureSerial);
++    QCOMPOSITOR_TRY_VERIFY(xdgPopup(1)->m_grabbed);
++
++    // Close the middle tooltip (it should not close the sibling popup)
++    window.m_tooltip->close();
++
++    QCOMPOSITOR_TRY_COMPARE(xdgPopup(1), nullptr);
++    // Verify the remaining xdg surface is a grab popup..
++    QCOMPOSITOR_TRY_VERIFY(xdgPopup(0));
++    QCOMPOSITOR_TRY_VERIFY(xdgPopup(0)->m_grabbed);
++
++    window.m_tooltip->m_popup->close();
++    QCOMPOSITOR_TRY_COMPARE(xdgPopup(1), nullptr);
++    QCOMPOSITOR_TRY_COMPARE(xdgPopup(0), nullptr);
++}
++
+ // QTBUG-65680
+ void tst_xdgshell::switchPopups()
+ {
+@@ -505,7 +598,7 @@ void tst_xdgshell::minMaxSize()
      window.show();
      QCOMPOSITOR_TRY_VERIFY(xdgToplevel());
  
