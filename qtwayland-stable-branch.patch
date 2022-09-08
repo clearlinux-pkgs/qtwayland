@@ -9,6 +9,9 @@ Aleix Pol (3):
       client: Allow QWaylandInputContext to accept composed key combinations
       Do not update the mask if we do not have a surface
 
+Alexandros Frantzis (1):
+      linux-dmabuf-unstable-v1: Fix importing dmabuf buffers with modifiers
+
 Andreas Cord-Landwehr (1):
       Ensure that grabbing is performed in correct context
 
@@ -18,7 +21,7 @@ Antti Kokko (1):
 Arjen Hiemstra (1):
       Client: Delay deletion of QDrag object until after we're done with it
 
-David Edmundson (10):
+David Edmundson (11):
       Client: Send set_window_geometry only once configured
       Client: Send exposeEvent to parent on subsurface position changes
       Client: Connect drags being accepted to updating the source drag icon
@@ -29,18 +32,23 @@ David Edmundson (10):
       Client: Avoid processing of events when showing windows
       client: Simplify round trip behavior
       Client: clear focus on touch cancel
+      Guard mResizeDirty by the correctMutex
 
 David Redondo (1):
       Hook up queryKeyboardModifers
+
+Dominik Holland (1):
+      Cleanup up all subsurface QQuickItems correctly
 
 Elvis Lee (2):
       Handle registry_global out of constructor
       Connect flushRequest after forceRoundTrip
 
-Eskil Abrahamsen Blomfeldt (3):
+Eskil Abrahamsen Blomfeldt (4):
       Fix leaked subsurface wayland items
       Fix memory leak in QWaylandGLContext
       Fix race condition when attaching client to text input
+      client: Gracefully handle shutdown and window hiding
 
 Fabian Vogt (1):
       Use proper dependencies in compile tests
@@ -73,6 +81,9 @@ Jani Heikkinen (2):
       Bump version
       Bump version
 
+JiDe Zhang (1):
+      Add BlankCursor for cursor names map
+
 Joni Poikelin (1):
       Fix crash if no input method module could be loaded
 
@@ -97,9 +108,9 @@ Méven Car (1):
 
 Paul Olav Tvete (4):
       Wayland client: Fix crash when windows are shown/hidden during drag
-      Use wl_surface.damage_buffer on the client side
       Revert "Client: Remove mWaitingForUpdateDelivery"
       Fix race condition on mWaitingForUpdateDelivery
+      Use wl_surface.damage_buffer on the client side
 
 Paul Wicking (1):
       Doc: List correct license information for the module
@@ -116,12 +127,14 @@ Sam James (1):
 Samuli Piippo (1):
       Add missing define guards
 
-Tarja Sundqvist (5):
+Tarja Sundqvist (7):
       Update commercial license headers
       Revert "Update commercial license headers"
       Bump version
+      Bump version
       Merge remote-tracking branch 'origin/tqtc/lts-5.15.4' into tqtc/lts-5.15-opensource
       Merge remote-tracking branch 'origin/tqtc/lts-5.15.5' into tqtc/lts-5.15-opensource
+      Merge remote-tracking branch 'origin/tqtc/lts-5.15.6' into tqtc/lts-5.15-opensource
 
 Ulf Hermann (1):
       Reduce memory leakage
@@ -252,6 +265,19 @@ index 87dd6cea..b6ee43c9 100644
      return r;
  }
  
+diff --git a/src/client/qwaylandcursor.cpp b/src/client/qwaylandcursor.cpp
+index 3263b17f..e4eca9d4 100644
+--- a/src/client/qwaylandcursor.cpp
++++ b/src/client/qwaylandcursor.cpp
+@@ -120,6 +120,8 @@ wl_cursor *QWaylandCursorTheme::requestCursor(WaylandCursor shape)
+ 
+         {SizeAllCursor, "size_all"},
+ 
++        {BlankCursor, "blank"},
++
+         {SplitVCursor, "split_v"},
+         {SplitVCursor, "row-resize"},
+         {SplitVCursor, "sb_v_double_arrow"},
 diff --git a/src/client/qwaylanddatadevice.cpp b/src/client/qwaylanddatadevice.cpp
 index 19944a34..fbb5aa91 100644
 --- a/src/client/qwaylanddatadevice.cpp
@@ -1800,7 +1826,7 @@ index df1c94f2..050cfdc0 100644
  
  #if QT_CONFIG(cursor)
 diff --git a/src/client/qwaylandwindow.cpp b/src/client/qwaylandwindow.cpp
-index bc031ed5..c90a0ebf 100644
+index bc031ed5..c6477ec4 100644
 --- a/src/client/qwaylandwindow.cpp
 +++ b/src/client/qwaylandwindow.cpp
 @@ -76,7 +76,6 @@ QWaylandWindow *QWaylandWindow::mMouseGrab = nullptr;
@@ -1877,7 +1903,22 @@ index bc031ed5..c90a0ebf 100644
      }
  }
  
-@@ -362,11 +369,11 @@ void QWaylandWindow::setGeometry(const QRect &rect)
+@@ -351,22 +358,23 @@ void QWaylandWindow::setGeometry(const QRect &rect)
+         if (mWindowDecoration)
+             mWindowDecoration->update();
+ 
+-        if (mResizeAfterSwap && windowType() == Egl && mSentInitialResize)
++        if (mResizeAfterSwap && windowType() == Egl && mSentInitialResize) {
++            QMutexLocker lock(&mResizeLock);
+             mResizeDirty = true;
+-        else
++        } else {
+             QWindowSystemInterface::handleGeometryChange(window(), geometry());
+-
++        }
+         mSentInitialResize = true;
+     }
+     QRect exposeGeometry(QPoint(), geometry().size());
      if (isExposed() && !mInResizeFromApplyConfigure && exposeGeometry != mLastExposeGeometry)
          sendExposeEvent(exposeGeometry);
  
@@ -1891,7 +1932,7 @@ index bc031ed5..c90a0ebf 100644
  }
  
  void QWaylandWindow::resizeFromApplyConfigure(const QSize &sizeWithMargins, const QPoint &offset)
-@@ -391,21 +398,6 @@ void QWaylandWindow::sendExposeEvent(const QRect &rect)
+@@ -391,23 +399,9 @@ void QWaylandWindow::sendExposeEvent(const QRect &rect)
      mLastExposeGeometry = rect;
  }
  
@@ -1912,8 +1953,11 @@ index bc031ed5..c90a0ebf 100644
 -
  QPlatformScreen *QWaylandWindow::calculateScreenFromSurfaceEvents() const
  {
++    QReadLocker lock(&mSurfaceLock);
      if (mSurface) {
-@@ -424,18 +416,14 @@ void QWaylandWindow::setVisible(bool visible)
+         if (auto *screen = mSurface->oldestEnteredScreen())
+             return screen;
+@@ -424,18 +418,14 @@ void QWaylandWindow::setVisible(bool visible)
      lastVisible = visible;
  
      if (visible) {
@@ -1933,7 +1977,7 @@ index bc031ed5..c90a0ebf 100644
          reset();
      }
  }
-@@ -456,14 +444,15 @@ void QWaylandWindow::lower()
+@@ -456,14 +446,15 @@ void QWaylandWindow::lower()
  
  void QWaylandWindow::setMask(const QRegion &mask)
  {
@@ -1952,21 +1996,29 @@ index bc031ed5..c90a0ebf 100644
      if (mMask.isEmpty()) {
          mSurface->set_input_region(nullptr);
  
-@@ -546,8 +535,8 @@ void QWaylandWindow::sendRecursiveExposeEvent()
+@@ -546,8 +537,12 @@ void QWaylandWindow::sendRecursiveExposeEvent()
  
  void QWaylandWindow::attach(QWaylandBuffer *buffer, int x, int y)
  {
 -    Q_ASSERT(!buffer->committed());
++    QReadLocker locker(&mSurfaceLock);
++    if (mSurface == nullptr)
++        return;
++
      if (buffer) {
 +        Q_ASSERT(!buffer->committed());
          handleUpdate();
          buffer->setBusy();
  
-@@ -565,7 +554,11 @@ void QWaylandWindow::attachOffset(QWaylandBuffer *buffer)
+@@ -565,7 +560,15 @@ void QWaylandWindow::attachOffset(QWaylandBuffer *buffer)
  
  void QWaylandWindow::damage(const QRect &rect)
  {
 -    mSurface->damage(rect.x(), rect.y(), rect.width(), rect.height());
++    QReadLocker locker(&mSurfaceLock);
++    if (mSurface == nullptr)
++        return;
++
 +    const int s = scale();
 +    if (mDisplay->compositorVersion() >= 4)
 +        mSurface->damage_buffer(s * rect.x(), s * rect.y(), s * rect.width(), s * rect.height());
@@ -1975,7 +2027,13 @@ index bc031ed5..c90a0ebf 100644
  }
  
  void QWaylandWindow::safeCommit(QWaylandBuffer *buffer, const QRegion &damage)
-@@ -599,8 +592,14 @@ void QWaylandWindow::commit(QWaylandBuffer *buffer, const QRegion &damage)
+@@ -595,12 +598,20 @@ void QWaylandWindow::commit(QWaylandBuffer *buffer, const QRegion &damage)
+         qCDebug(lcWaylandBackingstore) << "Buffer already committed, ignoring.";
+         return;
+     }
++
++    QReadLocker locker(&mSurfaceLock);
+     if (!mSurface)
          return;
  
      attachOffset(buffer);
@@ -1992,7 +2050,15 @@ index bc031ed5..c90a0ebf 100644
      Q_ASSERT(!buffer->committed());
      buffer->setCommitted();
      mSurface->commit();
-@@ -613,42 +612,50 @@ void QWaylandWindow::commit()
+@@ -608,47 +619,57 @@ void QWaylandWindow::commit(QWaylandBuffer *buffer, const QRegion &damage)
+ 
+ void QWaylandWindow::commit()
+ {
+-    mSurface->commit();
++    QReadLocker locker(&mSurfaceLock);
++    if (mSurface != nullptr)
++        mSurface->commit();
+ }
  
  const wl_callback_listener QWaylandWindow::callbackListener = {
      [](void *data, wl_callback *callback, uint32_t time) {
@@ -2058,7 +2124,25 @@ index bc031ed5..c90a0ebf 100644
  
      if (mWaitingForFrameCallback) {
          qCDebug(lcWaylandBackingstore) << "Didn't receive frame callback in time, window should now be inexposed";
-@@ -797,7 +804,7 @@ bool QWaylandWindow::createDecoration()
+@@ -699,6 +720,7 @@ QPointF QWaylandWindow::mapFromWlSurface(const QPointF &surfacePosition) const
+ 
+ wl_surface *QWaylandWindow::wlSurface()
+ {
++    QReadLocker locker(&mSurfaceLock);
+     return mSurface ? mSurface->object() : nullptr;
+ }
+ 
+@@ -723,7 +745,8 @@ QWaylandScreen *QWaylandWindow::waylandScreen() const
+ 
+ void QWaylandWindow::handleContentOrientationChange(Qt::ScreenOrientation orientation)
+ {
+-    if (mDisplay->compositorVersion() < 2)
++    QReadLocker locker(&mSurfaceLock);
++    if (mDisplay->compositorVersion() < 2 || mSurface == nullptr)
+         return;
+ 
+     wl_output_transform transform;
+@@ -797,7 +820,7 @@ bool QWaylandWindow::createDecoration()
          decoration = false;
      if (mSubSurfaceWindow)
          decoration = false;
@@ -2067,7 +2151,7 @@ index bc031ed5..c90a0ebf 100644
          decoration = false;
  
      bool hadDecoration = mWindowDecoration;
-@@ -1070,10 +1077,18 @@ bool QWaylandWindow::setMouseGrabEnabled(bool grab)
+@@ -1070,10 +1093,18 @@ bool QWaylandWindow::setMouseGrabEnabled(bool grab)
      return true;
  }
  
@@ -2087,7 +2171,7 @@ index bc031ed5..c90a0ebf 100644
      mLastReportedWindowStates = states;
  }
  
-@@ -1136,8 +1151,11 @@ void QWaylandWindow::requestUpdate()
+@@ -1136,8 +1167,11 @@ void QWaylandWindow::requestUpdate()
      Q_ASSERT(hasPendingUpdateRequest()); // should be set by QPA
  
      // If we have a frame callback all is good and will be taken care of there
@@ -2101,7 +2185,7 @@ index bc031ed5..c90a0ebf 100644
  
      // If we've already called deliverUpdateRequest(), but haven't seen any attach+commit/swap yet
      // This is a somewhat redundant behavior and might indicate a bug in the calling code, so log
-@@ -1150,7 +1168,12 @@ void QWaylandWindow::requestUpdate()
+@@ -1150,7 +1184,12 @@ void QWaylandWindow::requestUpdate()
      // so use invokeMethod to delay the delivery a bit.
      QMetaObject::invokeMethod(this, [this] {
          // Things might have changed in the meantime
@@ -2115,7 +2199,7 @@ index bc031ed5..c90a0ebf 100644
              deliverUpdateRequest();
      }, Qt::QueuedConnection);
  }
-@@ -1161,19 +1184,19 @@ void QWaylandWindow::requestUpdate()
+@@ -1161,19 +1200,19 @@ void QWaylandWindow::requestUpdate()
  void QWaylandWindow::handleUpdate()
  {
      qCDebug(lcWaylandBackingstore) << "handleUpdate" << QThread::currentThread();
@@ -2141,7 +2225,7 @@ index bc031ed5..c90a0ebf 100644
      mFrameCallback = wl_surface_frame(wrappedSurface);
      wl_proxy_wrapper_destroy(wrappedSurface);
      wl_callback_add_listener(mFrameCallback, &QWaylandWindow::callbackListener, this);
-@@ -1183,6 +1206,8 @@ void QWaylandWindow::handleUpdate()
+@@ -1183,6 +1222,8 @@ void QWaylandWindow::handleUpdate()
      // Start a timer for handling the case when the compositor stops sending frame callbacks.
      if (mFrameCallbackTimeout > 0) {
          QMetaObject::invokeMethod(this, [this] {
@@ -2150,7 +2234,7 @@ index bc031ed5..c90a0ebf 100644
              if (mWaitingForFrameCallback) {
                  if (mFrameCallbackCheckIntervalTimerId < 0)
                      mFrameCallbackCheckIntervalTimerId = startTimer(mFrameCallbackTimeout);
-@@ -1231,16 +1256,32 @@ bool QWaylandWindow::isOpaque() const
+@@ -1231,16 +1272,32 @@ bool QWaylandWindow::isOpaque() const
  
  void QWaylandWindow::setOpaqueArea(const QRegion &opaqueArea)
  {
@@ -2187,7 +2271,7 @@ index bc031ed5..c90a0ebf 100644
  
  QT_END_NAMESPACE
 diff --git a/src/client/qwaylandwindow_p.h b/src/client/qwaylandwindow_p.h
-index 6cc1664b..d211178a 100644
+index 6cc1664b..2be87bc0 100644
 --- a/src/client/qwaylandwindow_p.h
 +++ b/src/client/qwaylandwindow_p.h
 @@ -148,6 +148,7 @@ public:
@@ -2232,6 +2316,15 @@ index 6cc1664b..d211178a 100644
  private:
      void setGeometry_helper(const QRect &rect);
      void initWindow();
+@@ -287,7 +294,7 @@ private:
+ 
+     static QWaylandWindow *mMouseGrab;
+ 
+-    QReadWriteLock mSurfaceLock;
++    mutable QReadWriteLock mSurfaceLock;
+ 
+     friend class QWaylandSubSurface;
+ };
 diff --git a/src/client/shellintegration/qwaylandshellintegration_p.h b/src/client/shellintegration/qwaylandshellintegration_p.h
 index ccad0048..4cc9b3b8 100644
 --- a/src/client/shellintegration/qwaylandshellintegration_p.h
@@ -2301,7 +2394,7 @@ index 49f0860e..db1cf00f 100644
      emit grabber->failed(QWaylandSurfaceGrabber::UnknownBufferType);
  #endif
 diff --git a/src/compositor/compositor_api/qwaylandquickitem.cpp b/src/compositor/compositor_api/qwaylandquickitem.cpp
-index 15f0195c..2ad53b7f 100644
+index 15f0195c..81808908 100644
 --- a/src/compositor/compositor_api/qwaylandquickitem.cpp
 +++ b/src/compositor/compositor_api/qwaylandquickitem.cpp
 @@ -319,6 +319,7 @@ private:
@@ -2312,9 +2405,11 @@ index 15f0195c..2ad53b7f 100644
   * \inqmlmodule QtWayland.Compositor
   * \since 5.8
   * \brief Provides a Qt Quick item that represents a WaylandView.
-@@ -737,6 +738,7 @@ void QWaylandQuickItem::handleSubsurfaceAdded(QWaylandSurface *childSurface)
+@@ -736,7 +737,9 @@ void QWaylandQuickItem::handleSubsurfaceAdded(QWaylandSurface *childSurface)
+         childItem->setSurface(childSurface);
          childItem->setVisible(true);
          childItem->setParentItem(this);
++        childItem->setParent(this);
          connect(childSurface, &QWaylandSurface::subsurfacePositionChanged, childItem, &QWaylandQuickItem::handleSubsurfacePosition);
 +        connect(childSurface, &QWaylandSurface::destroyed, childItem, &QObject::deleteLater);
      } else {
@@ -2610,10 +2705,18 @@ index 5b1f4d56..0079dfef 100644
  
  }
 diff --git a/src/hardwareintegration/client/wayland-egl/qwaylandglcontext.cpp b/src/hardwareintegration/client/wayland-egl/qwaylandglcontext.cpp
-index ccebf43d..1a1c349d 100644
+index ccebf43d..c1f45fa6 100644
 --- a/src/hardwareintegration/client/wayland-egl/qwaylandglcontext.cpp
 +++ b/src/hardwareintegration/client/wayland-egl/qwaylandglcontext.cpp
-@@ -336,6 +336,8 @@ QWaylandGLContext::QWaylandGLContext(EGLDisplay eglDisplay, QWaylandDisplay *dis
+@@ -192,7 +192,6 @@ public:
+     }
+     void blit(QWaylandEglWindow *window)
+     {
+-        Q_ASSERT(window->wlSurface());
+         QOpenGLTextureCache *cache = QOpenGLTextureCache::cacheForContext(m_context->context());
+ 
+         QSize surfaceSize = window->surfaceSize();
+@@ -336,6 +335,8 @@ QWaylandGLContext::QWaylandGLContext(EGLDisplay eglDisplay, QWaylandDisplay *dis
                                 << "It may also cause the event loop to freeze in some situations";
      }
  
@@ -2622,7 +2725,7 @@ index ccebf43d..1a1c349d 100644
      updateGLFormat();
  }
  
-@@ -404,6 +406,8 @@ void QWaylandGLContext::updateGLFormat()
+@@ -404,6 +405,8 @@ void QWaylandGLContext::updateGLFormat()
  QWaylandGLContext::~QWaylandGLContext()
  {
      delete m_blitter;
@@ -2631,7 +2734,7 @@ index ccebf43d..1a1c349d 100644
      eglDestroyContext(m_eglDisplay, m_context);
  }
  
-@@ -439,6 +443,10 @@ bool QWaylandGLContext::makeCurrent(QPlatformSurface *surface)
+@@ -439,6 +442,10 @@ bool QWaylandGLContext::makeCurrent(QPlatformSurface *surface)
          eglSurface = window->eglSurface();
      }
  
@@ -2666,6 +2769,158 @@ index 56a710c3..c6a8b6c6 100644
 +
  #include <EGL/egl.h>
  #include <EGL/eglext.h>
+ 
+diff --git a/src/hardwareintegration/compositor/linux-dmabuf-unstable-v1/linuxdmabufclientbufferintegration.cpp b/src/hardwareintegration/compositor/linux-dmabuf-unstable-v1/linuxdmabufclientbufferintegration.cpp
+index 74417586..6a3beaab 100644
+--- a/src/hardwareintegration/compositor/linux-dmabuf-unstable-v1/linuxdmabufclientbufferintegration.cpp
++++ b/src/hardwareintegration/compositor/linux-dmabuf-unstable-v1/linuxdmabufclientbufferintegration.cpp
+@@ -105,6 +105,11 @@ static QOpenGLTexture::TextureFormat openGLFormatFromBufferFormat(QWaylandBuffer
+     }
+ }
+ 
++// Initialize the EGLImage for a dmabuf buffer which conceptually consists of a
++// single plane. Note that depending on the modifiers, the buffer may be actually
++// transported as multiple dmabuf planes which must be combined into a single
++// EGLImage. For formats where the buffer needs to be represented as multiple
++// EGLImages (e.g., various YUV formats) a different approach is required.
+ bool LinuxDmabufClientBufferIntegration::initSimpleTexture(LinuxDmabufWlBuffer *dmabufBuffer)
+ {
+     bool success = true;
+@@ -118,79 +123,67 @@ bool LinuxDmabufClientBufferIntegration::initSimpleTexture(LinuxDmabufWlBuffer *
+         success = false;
+     }
+ 
+-    for (uint32_t i = 0; i < dmabufBuffer->planesNumber(); ++i) {
+-        QVarLengthArray<EGLint, 17> attribs;
+-        switch (i) {
+-        case 0:
+-            attribs = {
+-                EGL_WIDTH,                          dmabufBuffer->size().width(),
+-                EGL_HEIGHT,                         dmabufBuffer->size().height(),
+-                EGL_LINUX_DRM_FOURCC_EXT,           EGLint(dmabufBuffer->drmFormat()),
+-                EGL_DMA_BUF_PLANE0_FD_EXT,          dmabufBuffer->plane(i).fd,
+-                EGL_DMA_BUF_PLANE0_OFFSET_EXT,      EGLint(dmabufBuffer->plane(i).offset),
+-                EGL_DMA_BUF_PLANE0_PITCH_EXT,       EGLint(dmabufBuffer->plane(i).stride),
+-                EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, EGLint(dmabufBuffer->plane(i).modifiers & 0xffffffff),
+-                EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, EGLint(dmabufBuffer->plane(i).modifiers >> 32),
+-                EGL_NONE
+-            };
+-            break;
+-        case 1:
+-            attribs = {
+-                EGL_WIDTH,                          dmabufBuffer->size().width(),
+-                EGL_HEIGHT,                         dmabufBuffer->size().height(),
+-                EGL_LINUX_DRM_FOURCC_EXT,           EGLint(dmabufBuffer->drmFormat()),
+-                EGL_DMA_BUF_PLANE1_FD_EXT,          dmabufBuffer->plane(i).fd,
+-                EGL_DMA_BUF_PLANE1_OFFSET_EXT,      EGLint(dmabufBuffer->plane(i).offset),
+-                EGL_DMA_BUF_PLANE1_PITCH_EXT,       EGLint(dmabufBuffer->plane(i).stride),
+-                EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT, EGLint(dmabufBuffer->plane(i).modifiers & 0xffffffff),
+-                EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT, EGLint(dmabufBuffer->plane(i).modifiers >> 32),
+-                EGL_NONE
+-            };
+-            break;
+-        case 2:
+-            attribs = {
+-                EGL_WIDTH,                          dmabufBuffer->size().width(),
+-                EGL_HEIGHT,                         dmabufBuffer->size().height(),
+-                EGL_LINUX_DRM_FOURCC_EXT,           EGLint(dmabufBuffer->drmFormat()),
+-                EGL_DMA_BUF_PLANE2_FD_EXT,          dmabufBuffer->plane(i).fd,
+-                EGL_DMA_BUF_PLANE2_OFFSET_EXT,      EGLint(dmabufBuffer->plane(i).offset),
+-                EGL_DMA_BUF_PLANE2_PITCH_EXT,       EGLint(dmabufBuffer->plane(i).stride),
+-                EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT, EGLint(dmabufBuffer->plane(i).modifiers & 0xffffffff),
+-                EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT, EGLint(dmabufBuffer->plane(i).modifiers >> 32),
+-                EGL_NONE
+-            };
+-            break;
+-        case 3:
+-            attribs = {
+-                EGL_WIDTH,                          dmabufBuffer->size().width(),
+-                EGL_HEIGHT,                         dmabufBuffer->size().height(),
+-                EGL_LINUX_DRM_FOURCC_EXT,           EGLint(dmabufBuffer->drmFormat()),
+-                EGL_DMA_BUF_PLANE3_FD_EXT,          dmabufBuffer->plane(i).fd,
+-                EGL_DMA_BUF_PLANE3_OFFSET_EXT,      EGLint(dmabufBuffer->plane(i).offset),
+-                EGL_DMA_BUF_PLANE3_PITCH_EXT,       EGLint(dmabufBuffer->plane(i).stride),
+-                EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT, EGLint(dmabufBuffer->plane(i).modifiers & 0xffffffff),
+-                EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT, EGLint(dmabufBuffer->plane(i).modifiers >> 32),
+-                EGL_NONE
+-            };
++    // 6 entries for the common attribs plus 10 per possible plane, plus 1 for
++    // the final EGL_NONE sentinel.
++    QVarLengthArray<EGLint, 6 + 10 * 4 + 1> attribs;
++
++    attribs.append(EGL_WIDTH);
++    attribs.append(dmabufBuffer->size().width());
++    attribs.append(EGL_HEIGHT);
++    attribs.append(dmabufBuffer->size().height());
++    attribs.append(EGL_LINUX_DRM_FOURCC_EXT);
++    attribs.append(EGLint(dmabufBuffer->drmFormat()));
++
++#define ADD_PLANE_ATTRIBS(plane_idx) { \
++    attribs.append(EGL_DMA_BUF_PLANE ## plane_idx ## _FD_EXT); \
++    attribs.append(dmabufBuffer->plane(plane_idx).fd); \
++    attribs.append(EGL_DMA_BUF_PLANE ## plane_idx ## _OFFSET_EXT); \
++    attribs.append(EGLint(dmabufBuffer->plane(plane_idx).offset)); \
++    attribs.append(EGL_DMA_BUF_PLANE ## plane_idx ## _PITCH_EXT); \
++    attribs.append(EGLint(dmabufBuffer->plane(plane_idx).stride)); \
++    if (dmabufBuffer->plane(plane_idx).modifiers != DRM_FORMAT_MOD_INVALID) { \
++        attribs.append(EGL_DMA_BUF_PLANE ## plane_idx ## _MODIFIER_LO_EXT); \
++        attribs.append(EGLint(dmabufBuffer->plane(plane_idx).modifiers & 0xffffffff)); \
++        attribs.append(EGL_DMA_BUF_PLANE ## plane_idx ## _MODIFIER_HI_EXT); \
++        attribs.append(EGLint(dmabufBuffer->plane(plane_idx).modifiers >> 32)); \
++    } \
++}
++
++    switch (dmabufBuffer->planesNumber()) {
++    case 4:
++        ADD_PLANE_ATTRIBS(3);
++        Q_FALLTHROUGH();
++    case 3:
++        ADD_PLANE_ATTRIBS(2);
++        Q_FALLTHROUGH();
++    case 2:
++        ADD_PLANE_ATTRIBS(1);
++        Q_FALLTHROUGH();
++    case 1:
++        ADD_PLANE_ATTRIBS(0);
+         break;
+-        default:
+-            return false;
+-        }
++    default:
++        qCWarning(qLcWaylandCompositorHardwareIntegration) << "Buffer uses invalid number of planes:" << dmabufBuffer->planesNumber();
++        return false;
++    }
+ 
+-        // note: EGLImageKHR does NOT take ownership of the file descriptors
+-        EGLImageKHR image = egl_create_image(m_eglDisplay,
+-                                             EGL_NO_CONTEXT,
+-                                             EGL_LINUX_DMA_BUF_EXT,
+-                                             (EGLClientBuffer) nullptr,
+-                                             attribs.constData());
++    attribs.append(EGL_NONE);
+ 
+-        if (image == EGL_NO_IMAGE_KHR) {
+-            qCWarning(qLcWaylandCompositorHardwareIntegration) << "failed to create EGL image for plane" << i;
+-            success = false;
+-        }
++    // note: EGLImageKHR does NOT take ownership of the file descriptors
++    EGLImageKHR image = egl_create_image(m_eglDisplay,
++                                         EGL_NO_CONTEXT,
++                                         EGL_LINUX_DMA_BUF_EXT,
++                                         (EGLClientBuffer) nullptr,
++                                         attribs.constData());
+ 
+-        dmabufBuffer->initImage(i, image);
++    if (image == EGL_NO_IMAGE_KHR) {
++        qCWarning(qLcWaylandCompositorHardwareIntegration) << "failed to create EGL image from" <<
++            dmabufBuffer->planesNumber() << "plane(s)";
++        success = false;
+     }
++
++    dmabufBuffer->initImage(0, image);
++
+     return success;
+ }
  
 diff --git a/src/plugins/shellintegration/wl-shell/qwaylandwlshellsurface.cpp b/src/plugins/shellintegration/wl-shell/qwaylandwlshellsurface.cpp
 index 245fec19..8f41118d 100644
