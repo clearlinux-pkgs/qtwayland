@@ -4,7 +4,7 @@
 #
 Name     : qtwayland
 Version  : 5.15.2
-Release  : 41
+Release  : 42
 URL      : https://download.qt.io/official_releases/qt/5.15/5.15.2/submodules/qtwayland-everywhere-src-5.15.2.tar.xz
 Source0  : https://download.qt.io/official_releases/qt/5.15/5.15.2/submodules/qtwayland-everywhere-src-5.15.2.tar.xz
 Summary  : No detailed summary available
@@ -91,16 +91,16 @@ test -r config.log && cat config.log
 make  %{?_smp_mflags}
 
 %install
-export SOURCE_DATE_EPOCH=1659051469
+export SOURCE_DATE_EPOCH=1662602456
 rm -rf %{buildroot}
 mkdir -p %{buildroot}/usr/share/package-licenses/qtwayland
-cp %{_builddir}/qtwayland-everywhere-src-%{version}/LICENSE.FDL %{buildroot}/usr/share/package-licenses/qtwayland/61907422fefcd2313a9b570c31d203a6dbebd333
-cp %{_builddir}/qtwayland-everywhere-src-%{version}/LICENSE.GPL2 %{buildroot}/usr/share/package-licenses/qtwayland/4cc77b90af91e615a64ae04893fdffa7939db84c
-cp %{_builddir}/qtwayland-everywhere-src-%{version}/LICENSE.GPL3 %{buildroot}/usr/share/package-licenses/qtwayland/8624bcdae55baeef00cd11d5dfcfa60f68710a02
-cp %{_builddir}/qtwayland-everywhere-src-%{version}/LICENSE.GPL3-EXCEPT %{buildroot}/usr/share/package-licenses/qtwayland/e93757aefa405f2c9a8a55e780ae9c39542dfc3a
-cp %{_builddir}/qtwayland-everywhere-src-%{version}/LICENSE.LGPL3 %{buildroot}/usr/share/package-licenses/qtwayland/f45ee1c765646813b442ca58de72e20a64a7ddba
-cp %{_builddir}/qtwayland-everywhere-src-%{version}/src/3rdparty/protocol/HPND_LICENSE.txt %{buildroot}/usr/share/package-licenses/qtwayland/c26ed387addfc80ff83f3bd34f777d1f764c0a63
-cp %{_builddir}/qtwayland-everywhere-src-%{version}/src/3rdparty/protocol/MIT_LICENSE.txt %{buildroot}/usr/share/package-licenses/qtwayland/78fef8f56be8b440aa35115b77ac7f968f3974b7
+cp %{_builddir}/qtwayland-everywhere-src-%{version}/LICENSE.FDL %{buildroot}/usr/share/package-licenses/qtwayland/61907422fefcd2313a9b570c31d203a6dbebd333 || :
+cp %{_builddir}/qtwayland-everywhere-src-%{version}/LICENSE.GPL2 %{buildroot}/usr/share/package-licenses/qtwayland/4cc77b90af91e615a64ae04893fdffa7939db84c || :
+cp %{_builddir}/qtwayland-everywhere-src-%{version}/LICENSE.GPL3 %{buildroot}/usr/share/package-licenses/qtwayland/8624bcdae55baeef00cd11d5dfcfa60f68710a02 || :
+cp %{_builddir}/qtwayland-everywhere-src-%{version}/LICENSE.GPL3-EXCEPT %{buildroot}/usr/share/package-licenses/qtwayland/e93757aefa405f2c9a8a55e780ae9c39542dfc3a || :
+cp %{_builddir}/qtwayland-everywhere-src-%{version}/LICENSE.LGPL3 %{buildroot}/usr/share/package-licenses/qtwayland/f45ee1c765646813b442ca58de72e20a64a7ddba || :
+cp %{_builddir}/qtwayland-everywhere-src-%{version}/src/3rdparty/protocol/HPND_LICENSE.txt %{buildroot}/usr/share/package-licenses/qtwayland/c26ed387addfc80ff83f3bd34f777d1f764c0a63 || :
+cp %{_builddir}/qtwayland-everywhere-src-%{version}/src/3rdparty/protocol/MIT_LICENSE.txt %{buildroot}/usr/share/package-licenses/qtwayland/78fef8f56be8b440aa35115b77ac7f968f3974b7 || :
 %make_install
 
 %files
