@@ -96,8 +96,9 @@ Kai Uwe Broulik (1):
 Kenneth Topp (1):
       use poll(2) when reading from clipboard
 
-Liang Qi (1):
+Liang Qi (2):
       client: update button state and etc in pointer_leave()
+      client: Synthesize enter/leave event for popup in xdg-shell
 
 Morten Johan Sørvig (2):
       Make setting QT_SCALE_FACTOR work on Wayland
@@ -3107,7 +3108,7 @@ index 261f8cbb..c1bcd5c6 100644
  private:
      QScopedPointer<QWaylandXdgShellV6> m_xdgShell;
 diff --git a/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell.cpp b/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell.cpp
-index b6d23ac1..3999a5ee 100644
+index b6d23ac1..79177540 100644
 --- a/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell.cpp
 +++ b/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell.cpp
 @@ -67,11 +67,6 @@ QWaylandXdgSurface::Toplevel::Toplevel(QWaylandXdgSurface *xdgSurface)
@@ -3193,7 +3194,7 @@ index b6d23ac1..3999a5ee 100644
  }
  
  QWaylandXdgSurface::Popup::~Popup()
-@@ -213,10 +213,14 @@ QWaylandXdgSurface::Popup::~Popup()
+@@ -213,10 +213,24 @@ QWaylandXdgSurface::Popup::~Popup()
      if (isInitialized())
          destroy();
  
@@ -3206,10 +3207,20 @@ index b6d23ac1..3999a5ee 100644
          Q_ASSERT(shell->m_topmostGrabbingPopup == this);
 -        shell->m_topmostGrabbingPopup = m_parent->m_popup;
 +        shell->m_topmostGrabbingPopup = m_parentXdgSurface ? m_parentXdgSurface->m_popup : nullptr;
++        m_grabbing = false;
++
++        // Synthesize Qt enter/leave events for popup
++        QWindow *leave = nullptr;
++        if (m_xdgSurface && m_xdgSurface->window())
++            leave = m_xdgSurface->window()->window();
++        QWindowSystemInterface::handleLeaveEvent(leave);
++
++        if (QWindow *enter = QGuiApplication::topLevelAt(QCursor::pos()))
++            QWindowSystemInterface::handleEnterEvent(enter, enter->mapFromGlobal(QCursor::pos()), QCursor::pos());
      }
  }
  
-@@ -254,6 +258,7 @@ QWaylandXdgSurface::QWaylandXdgSurface(QWaylandXdgShell *shell, ::xdg_surface *s
+@@ -254,6 +268,7 @@ QWaylandXdgSurface::QWaylandXdgSurface(QWaylandXdgShell *shell, ::xdg_surface *s
                  m_toplevel->set_parent(parentXdgSurface->m_toplevel->object());
          }
      }
@@ -3217,7 +3228,7 @@ index b6d23ac1..3999a5ee 100644
  }
  
  QWaylandXdgSurface::~QWaylandXdgSurface()
-@@ -396,8 +401,6 @@ void QWaylandXdgSurface::setPopup(QWaylandWindow *parent)
+@@ -396,8 +411,6 @@ void QWaylandXdgSurface::setPopup(QWaylandWindow *parent)
  {
      Q_ASSERT(!m_toplevel && !m_popup);
  
@@ -3226,7 +3237,7 @@ index b6d23ac1..3999a5ee 100644
      auto positioner = new QtWayland::xdg_positioner(m_shell->create_positioner());
      // set_popup expects a position relative to the parent
      QPoint transientPos = m_window->geometry().topLeft(); // this is absolute
-@@ -410,8 +413,9 @@ void QWaylandXdgSurface::setPopup(QWaylandWindow *parent)
+@@ -410,8 +423,9 @@ void QWaylandXdgSurface::setPopup(QWaylandWindow *parent)
      positioner->set_anchor(QtWayland::xdg_positioner::anchor_top_left);
      positioner->set_gravity(QtWayland::xdg_positioner::gravity_bottom_right);
      positioner->set_size(m_window->geometry().width(), m_window->geometry().height());
@@ -3237,6 +3248,30 @@ index b6d23ac1..3999a5ee 100644
      delete positioner;
  }
  
+@@ -433,6 +447,23 @@ void QWaylandXdgSurface::setGrabPopup(QWaylandWindow *parent, QWaylandInputDevic
+     }
+     setPopup(parent);
+     m_popup->grab(device, serial);
++
++    // Synthesize Qt enter/leave events for popup
++    if (!parent)
++        return;
++    QWindow *current = QGuiApplication::topLevelAt(QCursor::pos());
++    QWindow *leave = parent->window();
++    if (current != leave)
++        return;
++
++    QWindowSystemInterface::handleLeaveEvent(leave);
++
++    QWindow *enter = nullptr;
++    if (m_popup && m_popup->m_xdgSurface && m_popup->m_xdgSurface->window())
++        enter = m_popup->m_xdgSurface->window()->window();
++
++    if (enter)
++        QWindowSystemInterface::handleEnterEvent(enter, enter->mapFromGlobal(QCursor::pos()), QCursor::pos());
+ }
+ 
+ void QWaylandXdgSurface::xdg_surface_configure(uint32_t serial)
 diff --git a/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell_p.h b/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell_p.h
 index 0c98be35..28ff76ba 100644
 --- a/src/plugins/shellintegration/xdg-shell/qwaylandxdgshell_p.h
