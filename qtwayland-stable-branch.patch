@@ -1,8 +1,9 @@
 Adrien Faveraux (1):
       Move the wayland socket polling to a separate event thread
 
-Albert Astals Cid (1):
+Albert Astals Cid (2):
       Include locale.h for setlocale/LC_CTYPE
+      Fix compile tests
 
 Aleix Pol (3):
       xdgshell: Tell the compositor the screen we're expecting to fill
@@ -3447,7 +3448,7 @@ index 1568b3b9..067410d0 100644
  class DataDeviceCompositor : public DefaultCompositor {
  public:
 diff --git a/tests/auto/client/seatv5/tst_seatv5.cpp b/tests/auto/client/seatv5/tst_seatv5.cpp
-index 9312c2e5..b063e0d9 100644
+index 9312c2e5..2ea382f1 100644
 --- a/tests/auto/client/seatv5/tst_seatv5.cpp
 +++ b/tests/auto/client/seatv5/tst_seatv5.cpp
 @@ -73,6 +73,7 @@ private slots:
@@ -3480,9 +3481,9 @@ index 9312c2e5..b063e0d9 100644
 +    {
 +        auto e = window.m_events.takeFirst();
 +        QCOMPARE(e.type, QEvent::TouchBegin);
-+        QCOMPARE(e.touchPointStates, QEventPoint::State::Pressed);
++        QCOMPARE(e.touchPointStates, Qt::TouchPointPressed);
 +        QCOMPARE(e.touchPoints.length(), 1);
-+        QCOMPARE(e.touchPoints.first().position(), QPointF(32-window.frameMargins().left(), 32-window.frameMargins().top()));
++        QCOMPARE(e.touchPoints.first().pos(), QPointF(32-window.frameMargins().left(), 32-window.frameMargins().top()));
 +    }
 +    {
 +        auto e = window.m_events.takeFirst();
