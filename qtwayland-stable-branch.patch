@@ -10,8 +10,9 @@ Aleix Pol (3):
       client: Allow QWaylandInputContext to accept composed key combinations
       Do not update the mask if we do not have a surface
 
-Alexandros Frantzis (1):
+Alexandros Frantzis (2):
       linux-dmabuf-unstable-v1: Fix importing dmabuf buffers with modifiers
+      Use CRLF line delimiter for text/uri-list data
 
 Andreas Cord-Landwehr (1):
       Ensure that grabbing is performed in correct context
@@ -3422,7 +3423,7 @@ index 526d0ef4..f50ccf30 100644
      }
  
 diff --git a/src/shared/qwaylandmimehelper.cpp b/src/shared/qwaylandmimehelper.cpp
-index a5fdd34d..051a91dc 100644
+index a5fdd34d..e2fe1928 100644
 --- a/src/shared/qwaylandmimehelper.cpp
 +++ b/src/shared/qwaylandmimehelper.cpp
 @@ -60,7 +60,7 @@ QByteArray QWaylandMimeHelper::getByteArray(QMimeData *mimeData, const QString &
@@ -3434,6 +3435,15 @@ index a5fdd34d..051a91dc 100644
                  if (QImageWriter::supportedImageFormats().contains(imgFmt))
                      fmt = imgFmt;
              }
+@@ -74,7 +74,7 @@ QByteArray QWaylandMimeHelper::getByteArray(QMimeData *mimeData, const QString &
+         QList<QUrl> urls = mimeData->urls();
+         for (int i = 0; i < urls.count(); ++i) {
+             content.append(urls.at(i).toEncoded());
+-            content.append('\n');
++            content.append("\r\n");
+         }
+     } else {
+         content = mimeData->data(mimeType);
 diff --git a/tests/auto/client/datadevicev1/tst_datadevicev1.cpp b/tests/auto/client/datadevicev1/tst_datadevicev1.cpp
 index 1568b3b9..067410d0 100644
 --- a/tests/auto/client/datadevicev1/tst_datadevicev1.cpp
