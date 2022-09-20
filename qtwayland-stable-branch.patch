@@ -46,11 +46,13 @@ Elvis Lee (2):
       Handle registry_global out of constructor
       Connect flushRequest after forceRoundTrip
 
-Eskil Abrahamsen Blomfeldt (4):
+Eskil Abrahamsen Blomfeldt (6):
       Fix leaked subsurface wayland items
       Fix memory leak in QWaylandGLContext
       Fix race condition when attaching client to text input
       client: Gracefully handle shutdown and window hiding
+      Fix missing update when toggling client-side decorations
+      Avoid calling requestUpdate from wrong thread
 
 Fabian Vogt (1):
       Use proper dependencies in compile tests
@@ -98,9 +100,10 @@ Kai Uwe Broulik (1):
 Kenneth Topp (1):
       use poll(2) when reading from clipboard
 
-Liang Qi (2):
+Liang Qi (3):
       client: update button state and etc in pointer_leave()
       client: Synthesize enter/leave event for popup in xdg-shell
+      Client: support high-dpi mode for window icon
 
 Morten Johan Sørvig (2):
       Make setting QT_SCALE_FACTOR work on Wayland
@@ -1829,7 +1832,7 @@ index df1c94f2..050cfdc0 100644
  
  #if QT_CONFIG(cursor)
 diff --git a/src/client/qwaylandwindow.cpp b/src/client/qwaylandwindow.cpp
-index bc031ed5..c6477ec4 100644
+index bc031ed5..771c96cc 100644
 --- a/src/client/qwaylandwindow.cpp
 +++ b/src/client/qwaylandwindow.cpp
 @@ -76,7 +76,6 @@ QWaylandWindow *QWaylandWindow::mMouseGrab = nullptr;
@@ -2154,7 +2157,25 @@ index bc031ed5..c6477ec4 100644
          decoration = false;
  
      bool hadDecoration = mWindowDecoration;
-@@ -1070,10 +1093,18 @@ bool QWaylandWindow::setMouseGrabEnabled(bool grab)
+@@ -844,6 +867,17 @@ bool QWaylandWindow::createDecoration()
+             subsurf->set_position(pos.x() + m.left(), pos.y() + m.top());
+         }
+         sendExposeEvent(QRect(QPoint(), geometry().size()));
++
++        // This is a special case where the buffer is recreated, but since
++        // the content rect remains the same, the widgets remain the same
++        // size and are not redrawn, leaving the new buffer empty. As a simple
++        // work-around, we trigger a full extra update whenever the client-side
++        // window decorations are toggled while the window is showing.
++        // Note: createDecoration() is sometimes called from the render thread
++        // of Qt Quick. This is essentially wrong and could potentially cause problems,
++        // but until the underlying issue has been fixed, we have to use invokeMethod()
++        // here to avoid asserts.
++        QMetaObject::invokeMethod(window(), &QWindow::requestUpdate);
+     }
+ 
+     return mWindowDecoration;
+@@ -1070,10 +1104,18 @@ bool QWaylandWindow::setMouseGrabEnabled(bool grab)
      return true;
  }
  
@@ -2174,7 +2195,7 @@ index bc031ed5..c6477ec4 100644
      mLastReportedWindowStates = states;
  }
  
-@@ -1136,8 +1167,11 @@ void QWaylandWindow::requestUpdate()
+@@ -1136,8 +1178,11 @@ void QWaylandWindow::requestUpdate()
      Q_ASSERT(hasPendingUpdateRequest()); // should be set by QPA
  
      // If we have a frame callback all is good and will be taken care of there
@@ -2188,7 +2209,7 @@ index bc031ed5..c6477ec4 100644
  
      // If we've already called deliverUpdateRequest(), but haven't seen any attach+commit/swap yet
      // This is a somewhat redundant behavior and might indicate a bug in the calling code, so log
-@@ -1150,7 +1184,12 @@ void QWaylandWindow::requestUpdate()
+@@ -1150,7 +1195,12 @@ void QWaylandWindow::requestUpdate()
      // so use invokeMethod to delay the delivery a bit.
      QMetaObject::invokeMethod(this, [this] {
          // Things might have changed in the meantime
@@ -2202,7 +2223,7 @@ index bc031ed5..c6477ec4 100644
              deliverUpdateRequest();
      }, Qt::QueuedConnection);
  }
-@@ -1161,19 +1200,19 @@ void QWaylandWindow::requestUpdate()
+@@ -1161,19 +1211,19 @@ void QWaylandWindow::requestUpdate()
  void QWaylandWindow::handleUpdate()
  {
      qCDebug(lcWaylandBackingstore) << "handleUpdate" << QThread::currentThread();
@@ -2228,7 +2249,7 @@ index bc031ed5..c6477ec4 100644
      mFrameCallback = wl_surface_frame(wrappedSurface);
      wl_proxy_wrapper_destroy(wrappedSurface);
      wl_callback_add_listener(mFrameCallback, &QWaylandWindow::callbackListener, this);
-@@ -1183,6 +1222,8 @@ void QWaylandWindow::handleUpdate()
+@@ -1183,6 +1233,8 @@ void QWaylandWindow::handleUpdate()
      // Start a timer for handling the case when the compositor stops sending frame callbacks.
      if (mFrameCallbackTimeout > 0) {
          QMetaObject::invokeMethod(this, [this] {
@@ -2237,7 +2258,7 @@ index bc031ed5..c6477ec4 100644
              if (mWaitingForFrameCallback) {
                  if (mFrameCallbackCheckIntervalTimerId < 0)
                      mFrameCallbackCheckIntervalTimerId = startTimer(mFrameCallbackTimeout);
-@@ -1231,16 +1272,32 @@ bool QWaylandWindow::isOpaque() const
+@@ -1231,16 +1283,32 @@ bool QWaylandWindow::isOpaque() const
  
  void QWaylandWindow::setOpaqueArea(const QRegion &opaqueArea)
  {
@@ -2925,6 +2946,27 @@ index 74417586..6a3beaab 100644
      return success;
  }
  
+diff --git a/src/plugins/decorations/bradient/main.cpp b/src/plugins/decorations/bradient/main.cpp
+index e75fda3c..fa885143 100644
+--- a/src/plugins/decorations/bradient/main.cpp
++++ b/src/plugins/decorations/bradient/main.cpp
+@@ -164,13 +164,10 @@ void QWaylandBradientDecoration::paint(QPaintDevice *device)
+     // Window icon
+     QIcon icon = waylandWindow()->windowIcon();
+     if (!icon.isNull()) {
+-        QPixmap pixmap = icon.pixmap(QSize(128, 128));
+-        QPixmap scaled = pixmap.scaled(22, 22, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+-
+         QRectF iconRect(0, 0, 22, 22);
+-        p.drawPixmap(iconRect.adjusted(margins().left() + BUTTON_SPACING, 4,
+-                                       margins().left() + BUTTON_SPACING, 4),
+-                     scaled, iconRect);
++        iconRect.adjust(margins().left() + BUTTON_SPACING, 4,
++                        margins().left() + BUTTON_SPACING, 4),
++        icon.paint(&p, iconRect.toRect());
+     }
+ 
+     // Window title
 diff --git a/src/plugins/shellintegration/wl-shell/qwaylandwlshellsurface.cpp b/src/plugins/shellintegration/wl-shell/qwaylandwlshellsurface.cpp
 index 245fec19..8f41118d 100644
 --- a/src/plugins/shellintegration/wl-shell/qwaylandwlshellsurface.cpp
@@ -3603,10 +3645,21 @@ index 949dc23d..d176837e 100644
                         uint32_t callback) override;
      void surface_commit(Resource *resource) override;
 diff --git a/tests/auto/client/surface/tst_surface.cpp b/tests/auto/client/surface/tst_surface.cpp
-index b8a65f15..95e4e609 100644
+index b8a65f15..60c672ce 100644
 --- a/tests/auto/client/surface/tst_surface.cpp
 +++ b/tests/auto/client/surface/tst_surface.cpp
-@@ -167,17 +167,40 @@ void tst_surface::negotiateShmFormat()
+@@ -129,6 +129,10 @@ void tst_surface::waitForFrameCallbackGl()
+     // Make sure we follow frame callbacks for some frames
+     for (int i = 0; i < 5; ++i) {
+         xdgPingAndWaitForPong(); // Make sure things have happened on the client
++        if (!qEnvironmentVariableIntValue("QT_WAYLAND_DISABLE_WINDOWDECORATION") && i == 0) {
++            QCOMPARE(bufferSpy.count(), 1);
++            bufferSpy.removeFirst();
++        }
+         exec([&] {
+             QVERIFY(bufferSpy.empty()); // Make sure no extra buffers have arrived
+             QVERIFY(!xdgToplevel()->surface()->m_waitingFrameCallbacks.empty());
+@@ -167,17 +171,40 @@ void tst_surface::negotiateShmFormat()
  void tst_surface::createSubsurface()
  {
      QRasterWindow window;
