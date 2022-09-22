@@ -57,6 +57,9 @@ Eskil Abrahamsen Blomfeldt (6):
 Fabian Vogt (1):
       Use proper dependencies in compile tests
 
+Fushan Wen (1):
+      Call `finishDrag()` in `QWaylandDataDevice::dragSourceCancelled()`
+
 Georges Basile Stavracas Neto (2):
       Client: Don't always recreate frame callbacks
       Client: Always destroy frame callback in the actual callback
@@ -285,7 +288,7 @@ index 3263b17f..e4eca9d4 100644
          {SplitVCursor, "row-resize"},
          {SplitVCursor, "sb_v_double_arrow"},
 diff --git a/src/client/qwaylanddatadevice.cpp b/src/client/qwaylanddatadevice.cpp
-index 19944a34..fbb5aa91 100644
+index 19944a34..e3e60ed5 100644
 --- a/src/client/qwaylanddatadevice.cpp
 +++ b/src/client/qwaylanddatadevice.cpp
 @@ -72,6 +72,8 @@ QWaylandDataDevice::QWaylandDataDevice(QWaylandDataDeviceManager *manager, QWayl
@@ -412,7 +415,11 @@ index 19944a34..fbb5aa91 100644
  }
  #endif // QT_CONFIG(draganddrop)
  
-@@ -280,11 +299,6 @@ void QWaylandDataDevice::dragSourceCancelled()
+@@ -277,14 +296,10 @@ void QWaylandDataDevice::selectionSourceCancelled()
+ #if QT_CONFIG(draganddrop)
+ void QWaylandDataDevice::dragSourceCancelled()
+ {
++    static_cast<QWaylandDrag *>(QGuiApplicationPrivate::platformIntegration()->drag())->finishDrag();
      m_dragSource.reset();
  }
  
@@ -424,7 +431,7 @@ index 19944a34..fbb5aa91 100644
  QPoint QWaylandDataDevice::calculateDragPosition(int x, int y, QWindow *wnd) const
  {
      QPoint pnt(wl_fixed_to_int(x), wl_fixed_to_int(y));
-@@ -297,6 +311,33 @@ QPoint QWaylandDataDevice::calculateDragPosition(int x, int y, QWindow *wnd) con
+@@ -297,6 +312,33 @@ QPoint QWaylandDataDevice::calculateDragPosition(int x, int y, QWindow *wnd) con
      }
      return pnt;
  }
