@@ -159,12 +159,13 @@ Ulf Hermann (1):
 Ville Voutilainen (1):
       Build fixes for GCC 11
 
-Vlad Zahorodnii (5):
+Vlad Zahorodnii (6):
       Scanner: Avoid accessing dangling pointers in destroy_func()
       Client: Announce an output after receiving more complete state
       Client: Remove mWaitingForUpdateDelivery
       Client: Fix opaque region setter
       Client: Ensure that wl_surface lives as long as qtquick render thread needs it
+      Client: Add F_SEAL_SHRINK seal to shm backing file
 
 Weng Xuetian (5):
       Use qWarning and _exit() instead of qFatal for wayland error
@@ -1857,6 +1858,39 @@ index df1c94f2..050cfdc0 100644
      bool mInitialized = false;
  
  #if QT_CONFIG(cursor)
+diff --git a/src/client/qwaylandshmbackingstore.cpp b/src/client/qwaylandshmbackingstore.cpp
+index dc7ff670..98acd42d 100644
+--- a/src/client/qwaylandshmbackingstore.cpp
++++ b/src/client/qwaylandshmbackingstore.cpp
+@@ -52,6 +52,7 @@
+ 
+ #include <QtWaylandClient/private/wayland-wayland-client-protocol.h>
+ 
++#include <fcntl.h>
+ #include <unistd.h>
+ #include <sys/mman.h>
+ 
+@@ -61,6 +62,9 @@
+ #  ifndef MFD_CLOEXEC
+ #    define MFD_CLOEXEC     0x0001U
+ #  endif
++#  ifndef MFD_ALLOW_SEALING
++#    define MFD_ALLOW_SEALING 0x0002U
++#  endif
+ #endif
+ 
+ QT_BEGIN_NAMESPACE
+@@ -75,7 +79,9 @@ QWaylandShmBuffer::QWaylandShmBuffer(QWaylandDisplay *display,
+     int fd = -1;
+ 
+ #ifdef SYS_memfd_create
+-    fd = syscall(SYS_memfd_create, "wayland-shm", MFD_CLOEXEC);
++    fd = syscall(SYS_memfd_create, "wayland-shm", MFD_CLOEXEC | MFD_ALLOW_SEALING);
++    if (fd >= 0)
++        fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_SEAL);
+ #endif
+ 
+     QScopedPointer<QFile> filePointer;
 diff --git a/src/client/qwaylandwindow.cpp b/src/client/qwaylandwindow.cpp
 index bc031ed5..d4083121 100644
 --- a/src/client/qwaylandwindow.cpp
