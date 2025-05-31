@@ -1,0 +1,51 @@
+From ac402438c09c96999c825a1961d2222a711d0248 Mon Sep 17 00:00:00 2001
+From: William Douglas <william.douglas@intel.com>
+Date: Fri, 30 May 2025 23:48:11 -0700
+Subject: [PATCH] backport-drm-flag-workaround
+
+---
+ src/client/configure.json     | 3 ++-
+ src/compositor/configure.json | 6 ++++--
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/src/client/configure.json b/src/client/configure.json
+index 73f2336..2f42458 100644
+--- a/src/client/configure.json
++++ b/src/client/configure.json
+@@ -149,7 +149,8 @@
+                     "#endif"
+                 ]
+             },
+-            "use": "egl drm"
++            "libs": "-ldrm",
++            "use": "egl"
+         },
+         "vulkan-server-buffer": {
+             "label": "Vulkan Buffer Sharing",
+diff --git a/src/compositor/configure.json b/src/compositor/configure.json
+index c5b0f03..bcfd521 100644
+--- a/src/compositor/configure.json
++++ b/src/compositor/configure.json
+@@ -151,7 +151,8 @@
+                     "#endif"
+                 ]
+             },
+-            "use": "egl drm"
++            "libs": "-ldrm",
++            "use": "egl"
+         },
+         "dmabuf-client-buffer": {
+             "label": "Linux Client dma-buf Buffer Sharing",
+@@ -175,7 +176,8 @@
+                     "return 0;"
+                 ]
+             },
+-            "use": "egl drm"
++            "libs": "-ldrm",
++            "use": "egl"
+         },
+         "vulkan-server-buffer": {
+             "label": "Vulkan Buffer Sharing",
+-- 
+2.49.0
+

@@ -3,3 +3,11 @@
 Qt5WaylandClient
 Qt5WaylandCompositor
 Qt5QuickControls2
+Qt6WaylandClient
+Qt6WaylandCompositor
+Qt6QuickControls2
+Qt6Core
+Qt6Gui
+Qt6Qml
+Qt6Quick
+Qt6Test

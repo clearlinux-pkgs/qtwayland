@@ -7,3 +7,8 @@ wayland-server
 wayland-egl
 xcomposite
 xkbcommon
+Qt5Core
+Qt5Gui
+Qt5Qml
+Qt5Quick
+Qt5Test
